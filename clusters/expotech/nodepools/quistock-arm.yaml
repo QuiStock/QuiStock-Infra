@@ -1,0 +1,24 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: quistock-arm
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m6g.large"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+  limits:
+    cpu: "4"
+    memory: 16Gi
