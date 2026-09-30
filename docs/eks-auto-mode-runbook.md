@@ -106,7 +106,7 @@ kubectl describe secret postgres-db -n api-core
 kubectl describe secret chatbot-external -n api-chatbot
 ```
 
-`describe` confirma nomes e tamanhos das chaves, sem revelar valores. Remova o arquivo temporário após a criação. Para trocar credenciais, atualize o Secret e reinicie os Deployments conforme necessário. O uso de credenciais de produção em um cluster temporário deve ser uma decisão explícita do responsável pelos dados.
+`describe` confirma nomes e tamanhos das chaves, sem revelar valores. Remova o arquivo temporário após a criação. Para trocar credenciais, atualize o Secret e reinicie os Deployments conforme necessário. Para o cluster temporário, o time escolheu **instâncias de teste** de Gemini/Groq, MongoDB, Qdrant e Redis. As credenciais serão fornecidas pelo responsável pelo chatbot. Não use valores produtivos nesse Secret.
 
 ## 6. Publicar serviços por release
 
@@ -137,7 +137,7 @@ A Core acessará o chatbot internamente pelo DNS `http://api-chatbot.api-chatbot
 
 ## 8. Estado pendente
 
-- **API Chatbot:** publicar primeira imagem, configurar o token de Infra, criar Secret e aplicar a Application; validar `/health` e uma requisição real com serviços externos.
+- **API Chatbot:** publicar primeira imagem, configurar o token de Infra, obter credenciais das instâncias de teste com o responsável, criar Secret e aplicar a Application; validar `/health` e uma requisição real com serviços externos.
 - **API Auth:** repositório ainda não existe. Repetir o padrão de Dockerfile ARM64, workflow de release, namespace, Secret, Deployment, Service e Application quando existir.
 - **Frontend React:** o repositório `QuiStock/quistock-dad` tem PRs para imagem ARM64 e Application. Após merge, configurar o token de Infra, publicar primeira release, aprovar PR de digest, aplicar Application e testar o Service. Alinhar `VITE_API_URL` e rotas `/stores`/`/managers` com APIs reais antes de considerar o site funcional.
 - **Mobile:** não roda no EKS. Configurar a URL pública de Auth/Core no app e distribuir por sua própria esteira.
