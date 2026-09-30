@@ -30,6 +30,13 @@ kubectl config current-context
 kubectl get nodepools
 ```
 
+Antes dos comandos com caminhos locais, obtenha a branch principal do repositório:
+
+```bash
+git clone https://github.com/QuiStock/QuiStock-Infra.git
+cd QuiStock-Infra
+```
+
 ## 2. Criar o NodePool ARM64
 
 O serviço usa `m6g.large` ARM64 na NodePool `quistock-arm`. A instalação do Argo CD usa esse NodePool, portanto crie-o **antes** do Helm:
@@ -43,7 +50,7 @@ O manifest usa o `NodeClass default` do EKS Auto Mode. Ao agendar os primeiros P
 
 ## 3. Instalar Argo CD
 
-O chart Helm do Argo CD usa [`clusters/expotech/argocd/values.yaml`](../clusters/expotech/argocd/values.yaml), que agenda os componentes no NodePool ARM64. O cluster atual usa o chart Helm `argo-cd-10.9.2` (confirmado pelo label do Deployment `argocd-server`). Fixe essa versão:
+O chart Helm do Argo CD usa [`clusters/expotech/argocd/values.yaml`](../clusters/expotech/argocd/values.yaml), que agenda os componentes no NodePool ARM64. O cluster atual usa o chart Helm `argo-cd-10.9.2` (confirmado pelo label do Deployment `argocd-server`). O CloudShell atual não tem `helm` instalado; [instale Helm 3 pelo procedimento oficial](https://docs.helm.sh/docs/v3/intro/install/) e confira `helm version`. Fixe a versão do chart:
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
@@ -86,12 +93,16 @@ Mantenha os valores no Bitwarden. No cluster novo, recrie Secrets no namespace c
 - `api-core/postgres-db`: `DB_URL` (JDBC PostgreSQL com TLS), `DB_USERNAME`, `DB_PASSWORD`. O cluster atual usa o banco de **teste** do Aiven.
 - `api-chatbot/chatbot-external`: `GEMINI_API_KEY`, `GROQ_API_KEY`, `MONGODB_URI`, `MONGODB_DB`, `QDRANT_URL`, `QDRANT_API_KEY`, `REDIS_URL`.
 
-Crie o Secret com os valores copiados do cofre em um terminal privado. Uma opção é montar um arquivo local temporário `.env` fora do repositório, com exatamente essas chaves, e executar:
+Crie os Secrets com os valores copiados do cofre em um terminal privado. Uma opção é montar arquivos locais temporários `.env` fora do repositório, com exatamente as chaves listadas, e executar:
 
 ```bash
+kubectl create secret generic postgres-db \
+  --namespace api-core \
+  --from-env-file=/caminho/privado/api-core.env
 kubectl create secret generic chatbot-external \
   --namespace api-chatbot \
   --from-env-file=/caminho/privado/chatbot.env
+kubectl describe secret postgres-db -n api-core
 kubectl describe secret chatbot-external -n api-chatbot
 ```
 
