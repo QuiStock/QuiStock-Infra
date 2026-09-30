@@ -65,6 +65,7 @@ Aplique as Applications uma vez para que o Argo CD passe a acompanhar a branch p
 kubectl apply -f clusters/expotech/bootstrap/nodepool-application.yaml
 kubectl apply -f clusters/expotech/bootstrap/api-core-namespace.yaml
 kubectl apply -f clusters/expotech/bootstrap/api-chatbot-namespace.yaml
+kubectl apply -f clusters/expotech/bootstrap/web-frontend-namespace.yaml
 ```
 
 Antes de aplicar cada Application de serviço, complete o Secret e confirme que a imagem referida no Deployment existe e pode ser baixada. Então:
@@ -72,10 +73,11 @@ Antes de aplicar cada Application de serviço, complete o Secret e confirme que 
 ```bash
 kubectl apply -f clusters/expotech/bootstrap/api-core-application.yaml
 kubectl apply -f clusters/expotech/bootstrap/api-chatbot-application.yaml
+kubectl apply -f clusters/expotech/bootstrap/web-frontend-application.yaml
 kubectl get applications -n argocd
 ```
 
-Não aplique a Application do chatbot enquanto o digest no manifest ainda for `:bootstrap`. Esse marcador é substituído pela PR da primeira release.
+Não aplique as Applications do chatbot ou frontend enquanto o digest no manifest ainda for `:bootstrap`. Esse marcador é substituído pela PR da primeira release de cada repositório.
 
 ## 5. Secrets fora do Git
 
@@ -126,6 +128,6 @@ A Core acessará o chatbot internamente pelo DNS `http://api-chatbot.api-chatbot
 
 - **API Chatbot:** publicar primeira imagem, configurar o token de Infra, criar Secret e aplicar a Application; validar `/health` e uma requisição real com serviços externos.
 - **API Auth:** repositório ainda não existe. Repetir o padrão de Dockerfile ARM64, workflow de release, namespace, Secret, Deployment, Service e Application quando existir.
-- **Frontend React:** repositório `QuiStock/quistock-dad`. Criar imagem estática e Application; alinhar `VITE_API_URL` e rotas `/stores`/`/managers` com APIs reais antes de considerar o site funcional.
+- **Frontend React:** o repositório `QuiStock/quistock-dad` tem PRs para imagem ARM64 e Application. Após merge, configurar o token de Infra, publicar primeira release, aprovar PR de digest, aplicar Application e testar o Service. Alinhar `VITE_API_URL` e rotas `/stores`/`/managers` com APIs reais antes de considerar o site funcional.
 - **Mobile:** não roda no EKS. Configurar a URL pública de Auth/Core no app e distribuir por sua própria esteira.
 - **Reconstrução integral:** registrar a versão Helm atual e os IDs de rede/roles da nova conta. As permissões do Learner Lab podem impedir a criação automatizada dessas roles.
