@@ -3,6 +3,7 @@
 Estado desejado do ambiente EKS Auto Mode do QuiStock. O Argo CD acompanha as pastas em `clusters/expotech`; a branch `main` é protegida e uma mudança de imagem entra por pull request.
 
 - [Runbook: do zero ao deploy](docs/eks-auto-mode-runbook.md)
+- [Modelo para adicionar Auth ou outro serviço](docs/new-service-checklist.md)
 - [NodePool ARM64](clusters/expotech/nodepools/quistock-arm.yaml)
 - [API Core](clusters/expotech/apps/api-core/)
 - [API Chatbot e worker](clusters/expotech/apps/api-chatbot/)
