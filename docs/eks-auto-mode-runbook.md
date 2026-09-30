@@ -43,7 +43,7 @@ O manifest usa o `NodeClass default` do EKS Auto Mode. Ao agendar os primeiros P
 
 ## 3. Instalar Argo CD
 
-O chart Helm do Argo CD usa [`clusters/expotech/argocd/values.yaml`](../clusters/expotech/argocd/values.yaml), que agenda os componentes no NodePool ARM64. Use uma versão de chart fixada e registre a versão adotada em uma atualização deste runbook:
+O chart Helm do Argo CD usa [`clusters/expotech/argocd/values.yaml`](../clusters/expotech/argocd/values.yaml), que agenda os componentes no NodePool ARM64. O cluster atual usa o chart Helm `argo-cd-10.9.2` (confirmado pelo label do Deployment `argocd-server`). Fixe essa versão:
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
@@ -51,7 +51,7 @@ helm repo update
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd --create-namespace \
   --values clusters/expotech/argocd/values.yaml \
-  --version '<VERSÃO_DO_CHART>'
+  --version 10.9.2
 kubectl rollout status deployment/argocd-server -n argocd --timeout=5m
 ```
 
