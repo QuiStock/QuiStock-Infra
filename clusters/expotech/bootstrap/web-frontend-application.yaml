@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-frontend
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/QuiStock/QuiStock-Infra.git
+    targetRevision: main
+    path: clusters/expotech/apps/web-frontend
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: web-frontend
+  syncPolicy:
+    automated:
+      selfHeal: true
