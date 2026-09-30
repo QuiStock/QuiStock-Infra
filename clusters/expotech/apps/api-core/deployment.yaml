@@ -23,7 +23,7 @@ spec:
         karpenter.sh/nodepool: quistock-arm
       containers:
         - name: api-core
-          image: ghcr.io/quistock/ds-backend@sha256:51dd207ffb04625bbee45864e309d5a963a943ee26124773eecf8a8f754ec577
+          image: ghcr.io/quistock/ds-backend@sha256:55fffb8666aac17ae0daa7d4f2de5ede855061b25ed909ad1553d58794c71068
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
