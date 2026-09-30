@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-chatbot-summary-worker
+  namespace: api-chatbot
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: api-chatbot-summary-worker
+  template:
+    metadata:
+      labels:
+        app: api-chatbot-summary-worker
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+        karpenter.sh/nodepool: quistock-arm
+      containers:
+        - name: summary-worker
+          image: ghcr.io/quistock/ai-multi-agent:bootstrap
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - src.memory.worker.summary_job_worker
+          envFrom:
+            - secretRef:
+                name: chatbot-external
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi

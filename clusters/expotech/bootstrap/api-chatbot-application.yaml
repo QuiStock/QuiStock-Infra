@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-chatbot
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/QuiStock/QuiStock-Infra.git
+    targetRevision: main
+    path: clusters/expotech/apps/api-chatbot
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: api-chatbot
+  syncPolicy:
+    automated:
+      selfHeal: true
