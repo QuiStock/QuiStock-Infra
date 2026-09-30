@@ -6,7 +6,7 @@ Estado desejado do ambiente EKS Auto Mode do QuiStock. O Argo CD acompanha as pa
 - [Modelo para adicionar Auth ou outro serviço](docs/new-service-checklist.md)
 - [NodePool ARM64](clusters/expotech/nodepools/quistock-arm.yaml)
 - [API Core](clusters/expotech/apps/api-core/)
-- [API Chatbot e worker](clusters/expotech/apps/api-chatbot/)
+- API Chatbot e worker: manifests em revisão na [PR #4](https://github.com/QuiStock/QuiStock-Infra/pull/4).
 
 ## Estado verificado
 
