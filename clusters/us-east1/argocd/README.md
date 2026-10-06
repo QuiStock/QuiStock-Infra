@@ -14,11 +14,11 @@ helm repo update argo
 helm template argocd argo/argo-cd \
   --namespace argocd \
   --version 10.9.6 \
-  --values clusters/gke/argocd/values.yaml >/tmp/quistock-argocd-rendered.yaml
+  --values clusters/us-east1/argocd/values.yaml >/tmp/quistock-argocd-rendered.yaml
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd --create-namespace \
   --version 10.9.6 \
-  --values clusters/gke/argocd/values.yaml \
+  --values clusters/us-east1/argocd/values.yaml \
   --wait --timeout 20m
 ```
 
