@@ -4,8 +4,8 @@ Esta pasta contém somente o estado desejado do **ambiente de teste** no GKE Aut
 
 ## Pré-requisitos antes de aplicar cada Application
 
-1. Faça merge desta PR e das PRs dos workflows de release de `DS_Auth` e `DS_Backend`, que devem atualizar `clusters/gke/apps/...` no Infra.
-2. Crie os namespaces com os manifests em `clusters/gke/bootstrap`.
+1. Faça merge desta PR e das PRs dos workflows de release de `DS_Auth` e `DS_Backend`, que devem atualizar `clusters/us-east1/apps/...` no Infra.
+2. Crie os namespaces com os manifests em `clusters/us-east1/bootstrap`.
 3. No Bitwarden, guarde separadamente as credenciais **de teste** de cada API. Recrie os Secrets no cluster sem adicionar valores ao Git:
    - `api-auth/auth-external`: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `MONGODB_URI`, `MONGODB_DATABASE`, `AUTH_JWT_ISSUER`, `AUTH_JWT_PRIVATE_KEY_BASE64`, `AUTH_JWT_PUBLIC_KEY_BASE64`, `AUTH_JWT_KEY_ID`, `AUTH_RATE_LIMIT_HMAC_KEY`.
    - `api-core/postgres-db`: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`.
@@ -21,14 +21,14 @@ Os Secrets podem ser criados com `kubectl create secret generic NOME -n NAMESPAC
 Na raiz do Infra, com `kubectl` apontando para o GKE:
 
 ```bash
-kubectl apply -f clusters/gke/bootstrap/api-auth-namespace.yaml
-kubectl apply -f clusters/gke/bootstrap/api-core-namespace.yaml
+kubectl apply -f clusters/us-east1/bootstrap/api-auth-namespace.yaml
+kubectl apply -f clusters/us-east1/bootstrap/api-core-namespace.yaml
 # Recrie os Secrets antes das Applications.
 # Confirme que os dois digests substituíram :bootstrap.
-kubectl apply -f clusters/gke/bootstrap/api-auth-application.yaml
+kubectl apply -f clusters/us-east1/bootstrap/api-auth-application.yaml
 kubectl get application api-auth -n argocd
 kubectl rollout status deployment/api-auth -n api-auth --timeout=10m
-kubectl apply -f clusters/gke/bootstrap/api-core-application.yaml
+kubectl apply -f clusters/us-east1/bootstrap/api-core-application.yaml
 kubectl get application api-core -n argocd
 kubectl rollout status deployment/api-core -n api-core --timeout=10m
 ```
