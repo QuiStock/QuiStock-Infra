@@ -1,5 +1,0 @@
-global:
-  nodeSelector:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: arm64
-    karpenter.sh/nodepool: quistock-arm

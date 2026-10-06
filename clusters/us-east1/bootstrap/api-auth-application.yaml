@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/QuiStock/QuiStock-Infra.git
     targetRevision: main
-    path: clusters/gke/apps/api-auth
+    path: clusters/us-east1/apps/api-auth
   destination:
     server: https://kubernetes.default.svc
     namespace: api-auth
