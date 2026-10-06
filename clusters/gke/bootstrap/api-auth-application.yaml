@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-auth
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/QuiStock/QuiStock-Infra.git
+    targetRevision: main
+    path: clusters/gke/apps/api-auth
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: api-auth
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
