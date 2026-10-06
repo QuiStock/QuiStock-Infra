@@ -1,8 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-auth
-  namespace: api-auth
+  name: api-core
+  namespace: api-core
 spec:
   replicas: 1
   strategy:
@@ -12,19 +12,18 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: api-auth
+      app: api-core
   template:
     metadata:
       labels:
-        app: api-auth
+        app: api-core
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
-        cloud.google.com/compute-class: autopilot-arm
       terminationGracePeriodSeconds: 30
       containers:
-        - name: api-auth
-          image: ghcr.io/quistock/ds-auth:bootstrap
+        - name: api-core
+          image: ghcr.io/quistock/ds-backend:bootstrap
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -33,55 +32,32 @@ spec:
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
-                  name: auth-external
+                  name: postgres-db
                   key: DB_URL
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: auth-external
+                  name: postgres-db
                   key: DB_USERNAME
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: auth-external
+                  name: postgres-db
                   key: DB_PASSWORD
-            - name: MONGODB_URI
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: MONGODB_URI
-            - name: MONGODB_DATABASE
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: MONGODB_DATABASE
             - name: AUTH_JWT_ISSUER
               valueFrom:
                 secretKeyRef:
-                  name: auth-external
+                  name: api-core-config
                   key: AUTH_JWT_ISSUER
-            - name: AUTH_JWT_PRIVATE_KEY_BASE64
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: AUTH_JWT_PRIVATE_KEY_BASE64
-            - name: AUTH_JWT_PUBLIC_KEY_BASE64
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: AUTH_JWT_PUBLIC_KEY_BASE64
-            - name: AUTH_JWT_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: AUTH_JWT_KEY_ID
-            - name: AUTH_RATE_LIMIT_HMAC_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: auth-external
-                  key: AUTH_RATE_LIMIT_HMAC_KEY
+            - name: AUTH_JWT_JWK_SET_URI
+              value: http://api-auth.api-auth.svc.cluster.local/.well-known/jwks.json
             - name: AUTH_JWT_AUDIENCE
               value: quistock-api
+            # O ambiente de teste ainda não tem integração ERP.
+            - name: ERP_SYNC_ENABLED
+              value: "false"
+            - name: HEALTH_ERP_REQUIRED
+              value: "false"
           startupProbe:
             tcpSocket:
               port: http
