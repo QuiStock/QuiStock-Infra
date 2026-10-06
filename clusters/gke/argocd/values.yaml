@@ -1,0 +1,37 @@
+# Argo CD para GKE Autopilot. Chart argo/argo-cd 10.9.6.
+# O Service fica interno; acesso à UI por kubectl port-forward.
+server:
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+controller:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Ainda não usamos SSO, ApplicationSets ou notificações.
+dex:
+  enabled: false
+
+applicationSet:
+  replicas: 0
+
+notifications:
+  enabled: false
