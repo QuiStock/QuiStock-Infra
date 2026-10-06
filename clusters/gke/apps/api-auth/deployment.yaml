@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-auth
+  namespace: api-auth
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: api-auth
+  template:
+    metadata:
+      labels:
+        app: api-auth
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+        cloud.google.com/compute-class: autopilot-arm
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api-auth
+          image: ghcr.io/quistock/ds-auth:bootstrap
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: DB_PASSWORD
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: MONGODB_URI
+            - name: MONGODB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: MONGODB_DATABASE
+            - name: AUTH_JWT_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: AUTH_JWT_ISSUER
+            - name: AUTH_JWT_PRIVATE_KEY_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: AUTH_JWT_PRIVATE_KEY_BASE64
+            - name: AUTH_JWT_PUBLIC_KEY_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: AUTH_JWT_PUBLIC_KEY_BASE64
+            - name: AUTH_JWT_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: AUTH_JWT_KEY_ID
+            - name: AUTH_RATE_LIMIT_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auth-external
+                  key: AUTH_RATE_LIMIT_HMAC_KEY
+            - name: AUTH_JWT_AUDIENCE
+              value: quistock-api
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
