@@ -20,7 +20,6 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
-        cloud.google.com/compute-class: autopilot-arm
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-core

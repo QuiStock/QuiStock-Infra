@@ -1,8 +1,13 @@
 # Cluster GKE do QuiStock
 
+> Infraestrutura anterior, preservada para rollback e retirada controlada.
+> Para novas implantações use [EKS Learner Lab](../../docs/learner-lab-feira.md).
+> O GitOps atual em `clusters/us-east1` tem como destino EKS ARM64; não use os
+> passos antigos abaixo para bootstrap de aplicações no GKE.
+
 Este diretório cria **somente** o cluster GKE Autopilot de teste, uma VPC, uma sub-rede com faixas para Pods e Services e habilita as APIs Compute Engine e Kubernetes Engine. Região padrão: `us-east1`. O projeto é variável para permitir reconstrução em outra conta. Nenhum comando abaixo deve ser executado dentro do repositório sem conferir o projeto ativo.
 
-Os manifests em `clusters/expotech` ainda são específicos do EKS (por exemplo, `karpenter.sh/nodepool: quistock-arm`). **Não aplique as Applications da AWS ao GKE**. A instalação do Argo CD, a adaptação dos Deployments, os Secrets e a entrada pública serão etapas posteriores, em PRs separadas.
+O diretório GitOps permanece `clusters/us-east1`. A migração remove o selector de compute class do GKE; o rollback no GKE exige validar ou restaurar a configuração anterior antes de reconciliar as Applications.
 
 ## Antes de começar
 

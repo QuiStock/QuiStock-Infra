@@ -1,0 +1,34 @@
+name: Validate EKS and Learner Lab bootstrap
+on:
+  pull_request:
+    paths:
+      - 'terraform/eks/**'
+      - 'scripts/learner-lab/**'
+      - 'clusters/us-east1/**'
+      - '.github/workflows/eks-validate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11.4'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: azure/setup-helm@v4.3.1
+        with:
+          version: 'v3.17.3'
+      - run: terraform -chdir=terraform/eks fmt -check -recursive
+      - run: terraform -chdir=terraform/eks init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=terraform/eks validate -no-color
+      - run: python -m unittest discover -s scripts/learner-lab/tests -v
+      - run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm template argocd argo/argo-cd --namespace argocd --version 10.9.6 --values clusters/us-east1/argocd/values.yaml > /tmp/argocd.yaml
+          helm repo add bitwarden https://charts.bitwarden.com/
+          helm template sm-operator bitwarden/sm-operator --namespace sm-operator-system --version 2.0.3 > /tmp/bitwarden.yaml
