@@ -71,12 +71,13 @@ spec:
             failureThreshold: 36
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/readiness
               port: http
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health/liveness
               port: http
             periodSeconds: 10
           resources:
