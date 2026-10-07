@@ -59,7 +59,10 @@ spec:
               value: "false"
             - name: HEALTH_ERP_REQUIRED
               value: "false"
-            # Pool size config
+            - name: HEALTH_TIMEOUT_MS
+              value: "4000"
+            - name: HEALTH_CACHE_TTL
+              value: "5s"
             - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
               value: "3"
             - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
