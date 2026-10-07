@@ -2,7 +2,7 @@
 
 Esta pasta substitui **apenas a configuração Helm do Argo CD** usada no EKS. O chart é `argo/argo-cd` versão **10.9.6** (Argo CD v3.5.3). Os manifests em `clusters/expotech` continuam específicos da AWS e não devem ser aplicados ao GKE.
 
-O Service da interface permanece `ClusterIP`. Não é criado IP público nem load balancer. Dex, notificações e ApplicationSet ficam sem Pods porque ainda não são necessários. Os componentes ativos têm requests explícitos; no Autopilot a cobrança depende dos requests efetivos dos Pods e o GKE pode ajustá-los aos mínimos permitidos. Confirme os requests reais após a instalação.
+O Service da interface usa `LoadBalancer`: o GKE cria um IP público para acesso pelo navegador e cobra pelo balanceador/regras de encaminhamento mesmo sem tráfego. O Argo CD continua servindo HTTPS com o certificado padrão, que o navegador pode marcar como não confiável. Dex, notificações e ApplicationSet ficam sem Pods porque ainda não são necessários. Os componentes ativos têm requests explícitos; no Autopilot a cobrança depende dos requests efetivos dos Pods e o GKE pode ajustá-los aos mínimos permitidos. Confirme os requests reais após a instalação.
 
 ## Instalar após criar o cluster com Terraform
 
@@ -32,6 +32,8 @@ kubectl get pods,svc -n argocd
 kubectl get svc argocd-server -n argocd
 ```
 
-O `argocd-server` deve permanecer `ClusterIP`. Para abrir a interface a partir de um computador com `kubectl` configurado para este GKE, use `kubectl port-forward -n argocd svc/argocd-server 8080:443` e acesse `https://localhost:8080`. A senha inicial do usuário `admin` está no Secret `argocd-initial-admin-secret`; troque-a após o primeiro acesso e guarde-a no Bitwarden. Não cole a senha em logs, chats ou no Git.
+Depois do `helm upgrade`, aguarde o campo `EXTERNAL-IP` do Service `argocd-server` deixar de mostrar `<pending>`. Acesse `https://EXTERNAL-IP` no navegador e aceite o aviso do certificado padrão para este ambiente de teste. O usuário inicial é `admin`; a senha gerada na instalação está no Secret `argocd-initial-admin-secret`. Troque-a após o primeiro acesso e guarde-a no Bitwarden. Não cole a senha em logs, chats ou no Git. O IP pode mudar se o Service ou cluster for recriado.
+
+Para atualizar uma instalação existente após o merge desta configuração, na raiz do clone atualizado execute `helm repo update argo` e o mesmo `helm upgrade --install` acima. Para deixar de pagar pelo balanceador, altere `server.service.type` de volta para `ClusterIP` no Git e aplique o upgrade Helm.
 
 Acompanhe os requests efetivos com `kubectl get pods -n argocd -o yaml` ou `kubectl describe pod`; ajuste os valores se houver OOM ou mudanças automáticas do Autopilot. Isso ainda não instala Core ou Auth.
