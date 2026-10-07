@@ -59,6 +59,11 @@ spec:
               value: "false"
             - name: HEALTH_ERP_REQUIRED
               value: "false"
+            # Pool size config
+            - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+              value: 3
+            - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+              value: 0
           startupProbe:
             tcpSocket:
               port: http
