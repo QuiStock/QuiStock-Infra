@@ -33,22 +33,22 @@ spec:
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
-                  name: postgres-db
+                  name: core-external
                   key: DB_URL
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: postgres-db
+                  name: core-external
                   key: DB_USERNAME
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-db
+                  name: core-external
                   key: DB_PASSWORD
             - name: AUTH_JWT_ISSUER
               valueFrom:
                 secretKeyRef:
-                  name: api-core-config
+                  name: core-external
                   key: AUTH_JWT_ISSUER
             - name: AUTH_JWT_JWK_SET_URI
               value: http://api-auth.api-auth.svc.cluster.local/.well-known/jwks.json
