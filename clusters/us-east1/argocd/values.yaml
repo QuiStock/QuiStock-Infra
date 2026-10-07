@@ -1,8 +1,8 @@
 # Argo CD para GKE Autopilot. Chart argo/argo-cd 10.9.6.
-# O Service fica interno; acesso à UI por kubectl port-forward.
+# A UI recebe um IP externo do GKE. O Argo CD mantém TLS no servidor.
 server:
   service:
-    type: ClusterIP
+    type: LoadBalancer
   resources:
     requests:
       cpu: 100m
