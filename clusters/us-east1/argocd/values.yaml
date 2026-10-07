@@ -1,8 +1,11 @@
-# Argo CD para GKE Autopilot. Chart argo/argo-cd 10.9.6.
-# A UI recebe um IP externo do GKE. O Argo CD mantém TLS no servidor.
+# Argo CD para EKS ARM64. Chart argo/argo-cd 10.9.6.
+# UI interna: kubectl port-forward svc/argocd-server -n argocd 8443:443.
+global:
+  nodeSelector:
+    kubernetes.io/arch: arm64
 server:
   service:
-    type: LoadBalancer
+    type: ClusterIP
   resources:
     requests:
       cpu: 100m

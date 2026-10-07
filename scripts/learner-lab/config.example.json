@@ -1,0 +1,17 @@
+{
+  "region": "us-east-1",
+  "cluster_name": "quistock",
+  "kubernetes_version": "REPLACE_WITH_STANDARD_SUPPORT_VERSION",
+  "cluster_role_name": "LabRole",
+  "node_role_name": "LabRole",
+  "admin_role_name": "REPLACE_WITH_OPERATOR_IAM_ROLE_NAME",
+  "availability_zones": ["us-east-1a", "us-east-1b"],
+  "admin_cidrs": ["REPLACE_WITH_OPERATOR_PUBLIC_IP/32"],
+  "instance_types": ["t4g.medium"],
+  "node_count": 2,
+  "addon_versions": {
+    "vpc_cni": "REPLACE_WITH_COMPATIBLE_VERSION",
+    "coredns": "REPLACE_WITH_COMPATIBLE_VERSION",
+    "kube_proxy": "REPLACE_WITH_COMPATIBLE_VERSION"
+  }
+}
