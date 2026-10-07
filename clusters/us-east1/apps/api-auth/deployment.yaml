@@ -82,6 +82,14 @@ spec:
                   key: AUTH_RATE_LIMIT_HMAC_KEY
             - name: AUTH_JWT_AUDIENCE
               value: quistock-api
+            - name: HEALTH_TIMEOUT_MS
+              value: "4000"
+            - name: HEALTH_CACHE_TTL
+              value: "5s"
+            - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+              value: "3"
+            - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+              value: "0"
           startupProbe:
             tcpSocket:
               port: http
