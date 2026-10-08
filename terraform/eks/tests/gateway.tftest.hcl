@@ -1,8 +1,4 @@
-mock_provider "aws" {
-  mock_data "aws_availability_zone" {
-    defaults = { zone_id = "use1-az1" }
-  }
-}
+mock_provider "aws" {}
 
 variables {
   account_id         = "123456789012"
@@ -19,48 +15,30 @@ variables {
   }
 }
 
-run "argocd_private_origin_contract" {
+run "argocd_public_https_contract" {
   command = plan
   override_resource {
-    target          = aws_lb.edge
+    target          = aws_lb.argocd
     override_during = plan
-    values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/edge/0123456789abcdef" }
+    values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/argocd/0123456789abcdef" }
   }
   override_resource {
-    target          = aws_security_group.nlb
+    target          = aws_security_group.argocd_public
     override_during = plan
     values          = { id = "sg-0123456789abcdef0" }
   }
-  override_resource {
-    target          = aws_cloudfront_vpc_origin.argocd
-    override_during = plan
-    values          = { id = "vo_fixture" }
+  assert {
+    condition     = !aws_lb.argocd.internal && aws_lb.edge.internal && aws_lb_listener.argocd.load_balancer_arn == aws_lb.argocd.arn && aws_lb_listener.argocd.port == 443 && aws_lb_listener.argocd.protocol == "TCP" && aws_lb_listener.edge.port == 80
+    error_message = "Public Argo CD must pass through HTTPS while API traffic stays on the private NLB."
   }
   assert {
-    condition     = aws_lb.edge.internal && aws_lb_listener.argocd.load_balancer_arn == aws_lb.edge.arn && aws_lb_listener.argocd.port == 81 && aws_lb_listener.edge.port == 80
-    error_message = "Argo CD must reuse the private NLB on a separate listener without changing the API listener."
+    condition     = aws_lb_target_group.argocd.port == 30081 && aws_lb_target_group.argocd.health_check[0].protocol == "HTTPS" && aws_vpc_security_group_ingress_rule.argocd_nodes_from_nlb.referenced_security_group_id == aws_security_group.argocd_public.id
+    error_message = "The existing target group must carry HTTPS, accessible only from the public NLB security group."
   }
   assert {
-    condition     = aws_lb_target_group.argocd.port == 30081 && aws_vpc_security_group_ingress_rule.argocd_nodes_from_nlb.referenced_security_group_id == aws_security_group.nlb.id
-    error_message = "Only the NLB may reach the Argo CD NodePort."
+    condition     = aws_vpc_security_group_ingress_rule.argocd_public_https.cidr_ipv4 == "0.0.0.0/0" && aws_vpc_security_group_ingress_rule.argocd_public_https.from_port == 443 && aws_vpc_security_group_ingress_rule.argocd_public_https.to_port == 443
+    error_message = "Public access is authorized only on port 443."
   }
-  assert {
-    condition     = aws_cloudfront_distribution.argocd.default_cache_behavior[0].viewer_protocol_policy == "https-only" && aws_cloudfront_distribution.argocd.default_cache_behavior[0].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-    error_message = "Public access must use HTTPS and disable caching of authenticated responses."
-  }
-  assert {
-    condition     = one(aws_cloudfront_distribution.argocd.origin).vpc_origin_config[0].vpc_origin_id == aws_cloudfront_vpc_origin.argocd.id && aws_cloudfront_distribution.argocd.default_cache_behavior[0].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
-    error_message = "CloudFront must use a private origin and forward cookies, query strings and Authorization."
-  }
-}
-
-run "unsupported_origin_zone_is_rejected" {
-  command = plan
-  override_data {
-    target = data.aws_availability_zone.argocd["us-east-1a"]
-    values = { zone_id = "use1-az3" }
-  }
-  expect_failures = [aws_cloudfront_vpc_origin.argocd]
 }
 
 run "private_gateway_contract" {

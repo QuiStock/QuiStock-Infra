@@ -1,16 +1,18 @@
 # Argo CD para EKS ARM64. Chart argo/argo-cd 10.9.6.
-# HTTPS termina no CloudFront; origem HTTP privada na porta NodePort 30081.
+# NLB público encaminha TCP 443 para o HTTPS do Argo CD na NodePort 30081.
 global:
   nodeSelector:
     kubernetes.io/arch: arm64
 configs:
   params:
-    server.insecure: true
+    server.insecure: false
+  cm:
+    users.anonymous.enabled: "false"
 server:
   service:
     type: NodePort
-    nodePortHttp: 30081
-    nodePortHttps: 30082
+    nodePortHttp: 30082
+    nodePortHttps: 30081
   resources:
     requests:
       cpu: 100m

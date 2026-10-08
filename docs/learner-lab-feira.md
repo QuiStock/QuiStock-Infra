@@ -11,7 +11,7 @@ efetivas do Learner Lab; não consideramos esse teste aprovado apenas com `valid
 Todos os acessos têm permissões idênticas: valide um perfil de laboratório uma
 vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo e URL do API Gateway precisam ser conferidos a cada troca.
 
-1. Confira nas instruções do curso se EKS, Graviton, S3, ELBv2/NLB, API Gateway HTTP API/VPC Link e CloudFront/VPC origins são permitidos,
+1. Confira nas instruções do curso se EKS, Graviton, S3, ELBv2/NLB, API Gateway HTTP API/VPC Link e NLB público são permitidos,
    quais tipos/tamanhos EC2 e zonas estão liberados, quotas e duração da sessão.
    Teste também o comportamento ao terminar e reiniciar a sessão; não suponha
    que encerrar a sessão encerre a cobrança ou preserve a disponibilidade.
@@ -29,16 +29,7 @@ vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo e URL do API
    O operador também precisa criar VPC Link, API/rotas/stage, security groups,
    NLB/listener/target group e anexar target groups ao Auto Scaling Group dos nós.
    Não é necessário criar uma role para um controlador Kubernetes de balanceadores.
-   CloudFront também precisa das operações de criar/consultar/atualizar/apagar
-   distributions e VPC origins. As policies gerenciadas são referenciadas pelos
-   IDs publicados pela AWS, sem `ListCachePolicies`/`ListOriginRequestPolicies`:
-   essas consultas são negadas no Learner Lab validado. As ENIs são criadas
-   pelo serviço usando a service-linked role.
-   Na primeira origem VPC, AWS cria a service-linked role
-   `AWSServiceRoleForCloudFrontVPCOrigin` se ela ainda não existir; o operador
-   precisa poder autorizar essa criação (`iam:CreateServiceLinkedRole` para
-   `vpcorigin.cloudfront.amazonaws.com`). Terraform não provisiona uma role
-   IAM customizada e não contorna um deny do laboratório.
+   A entrada do Argo CD usa outro NLB, público, sem CloudFront ou ACM.
    Use uma role administrativa diferente da role dos nós: o EKS cria uma
    Access Entry EC2_LINUX para a role dos nós e ela não pode ser STANDARD.
    O Learner Lab pode negar `iam:GetRole` para `voclabs`; o preflight não consulta
@@ -106,10 +97,10 @@ Também cria duas sub-redes privadas (sem NAT), um NLB interno, target group
 anexado ao ASG do node group e API Gateway HTTP API com VPC Link. O ASG
 registra automaticamente novos nós no target group, inclusive após substituição.
 O NodePort 30080 aceita entrada somente do security group do NLB; o NLB
-aceita porta 80 somente do VPC Link. CloudFront usa a porta 81 do mesmo NLB,
-com origem VPC e entrada restrita à prefix list gerenciada de origens CloudFront.
-O target group do Argo CD também acompanha o ASG e alcança somente NodePort 30081.
-Não abra os NodePorts para clientes externos. Não há novo balanceador nem NAT.
+aceita porta 80 somente do VPC Link. O Argo CD tem um NLB público separado:
+TCP 443 encaminha HTTPS para NodePort 30081. Seu target group também acompanha
+o ASG. O NodePort aceita entrada somente do security group desse NLB.
+Não abra os NodePorts para clientes externos. Não há NAT.
 Não cria NAT, roles IAM de aplicação, Karpenter, Auto Mode, autoscaler ou bancos.
 Nós têm saída pública mas não têm regra de entrada aberta ao mundo; o endpoint
 administrativo é restrito. O perfil depende de VPC CNI conseguir usar a role
@@ -133,10 +124,10 @@ podem conter informações sensíveis; proteja os arquivos e os backups.
 python scripts/learner-lab/lab.py verify --config .learner-lab/config.json --account ACCOUNT_ID
 # Aponte KUBECONFIG para o arquivo isolado, por exemplo em Bash:
 export KUBECONFIG="$PWD/.learner-lab/ACCOUNT_ID/us-east-1/quistock/kubeconfig"
-kubectl port-forward svc/argocd-server -n argocd 8080:80
+kubectl port-forward svc/argocd-server -n argocd 8443:443
 ```
 
-Acesse `http://localhost:8080` para operação local ou a URL HTTPS CloudFront
+Acesse `https://localhost:8443` para operação local ou a URL HTTPS do NLB
 impressa pelo script. Recupere a senha inicial somente no terminal privado,
 troque-a e guarde no Bitwarden. A autenticação do Argo CD permanece obrigatória.
 Para validar APIs sem publicação use port-forward dos Services de Auth e Core.
@@ -146,41 +137,31 @@ rollout e Argo, mas não substitui os testes funcionais de login/bancos/JWKS.
 
 ## Argo CD público e atualização de um cluster existente
 
-A entrada pública é `https://DISTRIBUTION.cloudfront.net`, separada das APIs.
-Não exige domínio, DNS ou ACM. CloudFront termina TLS e alcança o NLB por
-uma conexão VPC privada. HTTP entre CloudFront/NLB/Argo CD permanece nesse
-caminho privado; o NLB não se torna público. A policy `CachingDisabled` impede
-cache de páginas/respostas autenticadas; `AllViewerExceptHostHeader` encaminha
-cookies, Authorization e query strings. `configs.cm.url` recebe a URL real
-no Helm upgrade. Não há CORS aberto para o painel administrativo.
+A entrada é `https://NOME.elb.amazonaws.com`, gerada automaticamente pela AWS.
+Não exige domínio, DNS, ACM, CloudFront ou IP fixo. O NLB público tem entrada
+IPv4 aberta em TCP 443 (`0.0.0.0/0`), conforme autorizado para este laboratório.
+O HTTPS passa pelo NLB sem terminação e chega ao Argo CD na NodePort 30081;
+`server.insecure=false` e `users.anonymous.enabled=false`. A porta HTTP/NodePort
+30082 não recebe entrada pública. A entrada das APIs continua no NLB privado.
 
-Os IDs gerenciados são `4135ea2d-6df8-44a3-9df3-4b5a84be39ad` (CachingDisabled)
-e `b689b0a8-53d0-40ab-baf2-68738e2966ac` (AllViewerExceptHostHeader).
-Referenciá-los diretamente remove as consultas de listagem negadas no lab;
-não concede novas permissões nem garante autorização para criar a distribuição.
-Um erro nessa etapa do plano não aplica os recursos. Atualize o clone e repita
-`update`/`update --apply` usando o mesmo estado após receber a correção.
+O certificado padrão do Argo CD é autoassinado. O navegador mostra um aviso;
+aceite a exceção no endereço impresso pelo script. A conexão usa HTTPS e o
+login continua obrigatório. Para CLI use `argocd login NOME.elb.amazonaws.com
+--insecure` (a opção aceita o certificado autoassinado; não troca HTTPS por HTTP).
+Teste login, sincronização e logs no navegador no primeiro ensaio.
 
-VPC origins em us-east-1 não suportam `use1-az3` (ID estável, diferente do nome
-`us-east-1a`, que varia por conta). O plano verifica as zonas antes de aplicar.
-Se falhar, não altere zonas nem recrie o cluster por tentativa: reveja a
-topologia primeiro. O comando abaixo consulta os IDs da configuração usual:
+A verificação automatizada aguarda targets saudáveis, confere `/healthz` por
+HTTPS e exige rejeição de acesso anônimo a `/api/v1/applications`. Ela consulta
+somente `tls.crt` via Kubernetes e confia nesse certificado na conexão pública;
+não lê senha/chave privada nem desliga validação TLS globalmente. O certificado
+padrão não inclui o hostname AWS, então a verificação do hostname é omitida
+apenas para essa conexão. As verificações de HTTPS das APIs permanecem normais.
 
-```bash
-aws ec2 describe-availability-zones --region us-east-1 \
-  --zone-names us-east-1a us-east-1b \
-  --query 'AvailabilityZones[].{Name:ZoneName,Id:ZoneId}' --output table
-```
-
-VPC origins não suportam gRPC nativo; para a CLI Argo CD use `--grpc-web`.
-Verifique login, sincronização e acompanhamento de logs no navegador no
-primeiro ensaio. O teste automatizado confere health HTTPS e rejeição de
-leitura anônima de `/api/v1/applications`; ele não substitui esses testes.
-Veja [origens VPC](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)
-e [policies gerenciadas](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html).
-
-Para atualizar o cluster já provisionado, depois do merge, execute no CloudShell
-da mesma conta, usando o clone e a configuração originais:
+Depois do merge, execute no CloudShell da mesma conta com o clone/configuração
+originais. Se o CloudShell reiniciou, consulte seu IP com
+`curl -4fsS https://checkip.amazonaws.com` e acrescente-o com `/32` a
+`admin_cidrs` em `.learner-lab/config.json`, preservando os CIDRs necessários.
+Essa lista restringe o endpoint Kubernetes para o Helm, não a entrada do Argo.
 
 ```bash
 cd ~/QuiStock-Infra
@@ -188,30 +169,34 @@ git switch main
 git pull --ff-only
 export PATH="$HOME/bin:$PATH"
 aws sts get-caller-identity
-python3 scripts/learner-lab/lab.py update --config .learner-lab/config.json --account 244099186665
-# Confira adições, mudanças e 0 recursos a destruir. Não deve substituir EKS/nodes/NLB/API.
-python3 scripts/learner-lab/lab.py update --config .learner-lab/config.json --account 244099186665 --apply
+python3 scripts/learner-lab/lab.py update --config .learner-lab/config.json --account 244099186665 --migrate-argocd-public
+# Confira que as remoções/substituições pertencem somente à antiga entrada do Argo.
+python3 scripts/learner-lab/lab.py update --config .learner-lab/config.json --account 244099186665 --migrate-argocd-public --apply
 ```
 
-Se o CloudShell foi reiniciado, acrescente seu IP público atual com `/32` a
-`admin_cidrs` em `.learner-lab/config.json` antes do plano; mantenha os outros
-CIDRs necessários. Isso é acesso ao endpoint Kubernetes para o Helm upgrade,
-independente da URL pública do Argo CD. Obtenha o IP com
-`curl -4fsS https://checkip.amazonaws.com`.
+Como o apply CloudFront anterior foi interrompido, pode haver recursos já
+registrados no estado. A migração remove a regra `argocd_from_cloudfront`,
+substitui o listener `argocd` e as regras `argocd_to_nodes` e
+`argocd_nodes_from_nlb` para o NLB público. Se CloudFront/origem VPC chegaram a
+existir, também são removidos. O target group/ASG attachment existentes são
+reaproveitados, mudando o health check para HTTPS. Uma breve indisponibilidade
+do acesso ao Argo é esperada até o Helm restaurar TLS; as APIs não mudam.
 
-`update` exige o bucket de estado existente (não cria um estado alternativo),
-confirma que o cluster está registrado nesse estado, gera o plano, recusa
-qualquer delete/replacement e, com `--apply`, aplica
-Terraform e atualiza o Helm do Argo CD. Não reexecuta bootstrap das APIs nem
-reescreve os tokens Bitwarden. O Helm preserva a senha existente. CloudFront
-e a origem VPC podem levar dezenas de minutos para implantar. Se houver
-AccessDenied ou expiração de credenciais, preserve o estado e retome o mesmo
-comando depois de resolver a permissão/renovar a sessão. Se o apply terminar
-e o Helm falhar, repetir `update --apply` retoma a reconciliação sem recriar o
-cluster. Não publique uma origem HTTP aberta como contorno do bloqueio.
+`--migrate-argocd-public` permite delete/replacement somente nesses seis
+endereços da entrada antiga. Cluster, nós, NLB privado, API Gateway e target
+group não estão na lista: o script continua recusando sua destruição ou
+substituição. Não use `down`, `state rm` ou um estado vazio para fazer a troca.
+Sem essa flag, `update --apply` continua recusando qualquer delete/replacement.
+Para instalações novas, `up --apply` cria diretamente o NLB público, sem a flag.
+
+`update` exige o estado existente com o cluster registrado, aplica Terraform
+e atualiza o Helm do Argo CD. Não reexecuta bootstrap das APIs nem reescreve
+tokens Bitwarden ou a senha existente. Se ocorrer falha parcial, preserve o
+estado e retome o mesmo comando após resolver o erro/renovar credenciais quando
+expiradas. Se Terraform terminou mas o Helm falhou, repetir retoma o upgrade.
 
 No fim, abra a URL `Argo CD HTTPS` e entre com `admin`. Para obter a senha
-inicial (se ela ainda não foi substituída):
+inicial, caso ainda não tenha sido substituída:
 
 ```bash
 export KUBECONFIG="$PWD/.learner-lab/244099186665/us-east-1/quistock/kubeconfig"
@@ -220,11 +205,9 @@ kubectl get secret argocd-initial-admin-secret -n argocd \
 echo
 ```
 
-Troque a senha em User Info/Update Password e guarde-a no Bitwarden. Não
-compartilhe a saída. O certificado HTTPS protege também cookies e senha no
-acesso público. `down` remove distribution/origem/listener/target group junto
-com a infraestrutura, mantendo apenas o bucket de estado; a remoção CloudFront
-pode demorar. CloudFront adiciona custo de uso e a URL muda entre contas.
+Guarde a senha no Bitwarden e não compartilhe a saída. `down` remove também o
+NLB público, sem recurso LoadBalancer criado pelo Kubernetes. O novo NLB e
+seus IPv4 públicos têm custo enquanto existirem; a URL muda entre contas.
 
 ## Entrada pública HTTPS para desenvolvimento e feira
 

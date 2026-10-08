@@ -8,6 +8,7 @@ import getpass
 import json
 import os
 import re
+import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,6 +18,24 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Only resources belonging to the former Argo CD entry may be replaced/removed.
+# Cluster, nodes, API Gateway, private NLB and target group are never allowlisted.
+ARGOCD_ENTRY_MIGRATION = frozenset({
+    "aws_lb_listener.argocd",
+    "aws_vpc_security_group_egress_rule.argocd_to_nodes",
+    "aws_vpc_security_group_ingress_rule.argocd_nodes_from_nlb",
+    "aws_vpc_security_group_ingress_rule.argocd_from_cloudfront",
+    "aws_cloudfront_vpc_origin.argocd",
+    "aws_cloudfront_distribution.argocd",
+})
+
+
+def validate_plan(details, *, migrate_argocd_public=False):
+    deletions = {c["address"] for c in details.get("resource_changes", []) if "delete" in c["change"]["actions"]}
+    allowed = ARGOCD_ENTRY_MIGRATION if migrate_argocd_public else frozenset()
+    if deletions - allowed:
+        raise RuntimeError("Plan includes deletion/replacement outside the authorized Argo CD entry migration: " + ", ".join(sorted(deletions - allowed)))
 
 
 def run(args, *, capture=False, stdin=None, check=True):
@@ -139,8 +158,7 @@ class Lab:
             print("Plan only. Re-run with --apply after review.")
             return False
         details = json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "show", "-json", plan], capture=True).stdout)
-        if any("delete" in change["change"]["actions"] for change in details.get("resource_changes", [])):
-            raise RuntimeError("Plan includes deletion/replacement. Review manually; this command will not destroy existing resources.")
+        validate_plan(details, migrate_argocd_public=self.args.migrate_argocd_public)
         self.tf("apply", "-input=false", plan)
         return True
 
@@ -264,23 +282,40 @@ class Lab:
         else:
             raise RuntimeError("Argo CD NLB targets did not become healthy. Check NodePort 30081 and the Helm upgrade.")
         url = outputs["argocd_url"]["value"]
+        context = self.argocd_tls_context()
         for attempt in range(120):
             try:
-                with urllib.request.urlopen(url + "/healthz", timeout=10) as response:
+                with urllib.request.urlopen(url + "/healthz", timeout=10, context=context) as response:
                     if response.status != 200:
                         raise RuntimeError("Argo CD public health check failed.")
-                with urllib.request.urlopen(url + "/api/v1/applications", timeout=10):
+                with urllib.request.urlopen(url + "/api/v1/applications", timeout=10, context=context):
                     raise RuntimeError("Argo CD applications API is accessible without authentication.")
             except urllib.error.HTTPError as error:
                 if error.code in (401, 403) and error.url == url + "/api/v1/applications":
                     print(f"Argo CD HTTPS: {url}")
                     return
                 if attempt == 119:
-                    raise RuntimeError("Argo CD CloudFront endpoint failed HTTP verification.") from error
+                    raise RuntimeError("Argo CD public NLB endpoint failed HTTP verification.") from error
             except (urllib.error.URLError, TimeoutError):
                 if attempt == 119:
-                    raise RuntimeError("Argo CD CloudFront endpoint did not become reachable.")
+                    raise RuntimeError("Argo CD public NLB endpoint did not become reachable.")
             time.sleep(5)
+
+    def argocd_tls_context(self):
+        # Read only the public certificate through authenticated Kubernetes.
+        # Never read the password/private key or disable TLS globally.
+        for secret in ("argocd-server-tls", "argocd-secret"):
+            result = run(["kubectl", "get", "secret", secret, "-n", "argocd",
+                          "-o", r"jsonpath={.data.tls\.crt}"], capture=True, check=False)
+            if result.returncode == 0 and result.stdout.strip():
+                certificate = base64.b64decode(result.stdout, validate=True).decode("ascii")
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                # The generated certificate lacks the NLB DNS name. Trust the
+                # cluster certificate while retaining certificate verification.
+                context.check_hostname = False
+                context.load_verify_locations(cadata=certificate)
+                return context
+        raise RuntimeError("Argo CD TLS certificate missing. Check the Helm rollout and server.insecure=false.")
 
     def verify_public(self, url):
         # No tokens/passwords are used here. Real login remains an operator test.
@@ -329,8 +364,11 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--account", required=True)
     parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update; otherwise only plan")
+    parser.add_argument("--migrate-argocd-public", action="store_true", help="For update only: allow replacement/cleanup of the former Argo CD entry, never cluster/API resources")
     parser.add_argument("--confirm-destroy")
     args = parser.parse_args()
+    if args.migrate_argocd_public and args.command != "update":
+        parser.error("--migrate-argocd-public is only supported with update")
     lab = Lab(args)
     if args.command == "up":
         if lab.plan(create=True):
@@ -343,5 +381,5 @@ if __name__ == "__main__":
     try:
         main()
     except (RuntimeError, KeyboardInterrupt) as error:
-        print(f"Stopped: {error}. Renew credentials if needed, then resume the same account.", file=sys.stderr)
+        print(f"Stopped: {error}. Preserve state; inspect the error before resuming the same account.", file=sys.stderr)
         sys.exit(1)

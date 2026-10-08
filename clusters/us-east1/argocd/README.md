@@ -1,15 +1,27 @@
 # Argo CD no EKS ARM64
 
-Chart `argo/argo-cd` 10.9.6, instalado pelo script de bootstrap. Terraform publica uma URL HTTPS `cloudfront.net` com certificado da AWS e origem VPC no NLB privado existente. O Service NodePort HTTP 30081 aceita tráfego somente do NLB. O selector global preserva ARM64. Dex, ApplicationSet e notificações permanecem desativados.
+Chart `argo/argo-cd` 10.9.6, instalado pelo script de bootstrap. Terraform cria
+um NLB público separado com endereço HTTPS `elb.amazonaws.com`. TCP 443
+encaminha ao HTTPS do Argo CD na NodePort 30081. O HTTP/NodePort 30082 não é
+aberto publicamente. Não exige CloudFront, ACM, domínio ou controlador AWS.
 
-Para operação:
+Entrada pública IPv4 em 443 é aberta a qualquer origem. O login é obrigatório
+(`users.anonymous.enabled=false`) e TLS permanece habilitado
+(`server.insecure=false`). O certificado padrão é autoassinado; o navegador
+mostra um aviso. O bootstrap configura `configs.cm.url` com o endereço real.
+Selector global ARM64; Dex, ApplicationSet e notificações permanecem desativados.
+
+Para operação local:
 
 ```bash
-kubectl port-forward svc/argocd-server -n argocd 8080:80
+kubectl port-forward svc/argocd-server -n argocd 8443:443
 ```
 
-Acesse `http://localhost:8080` para operação local. A URL pública HTTPS é impressa pelo script; o bootstrap configura `configs.cm.url` com esse endereço. TLS termina no CloudFront; `server.insecure` habilita HTTP somente no caminho privado até o servidor. Cache fica desabilitado e cookies/Authorization/query strings são encaminhados. Login continua obrigatório; CORS aberto das APIs não se aplica ao Argo CD.
+Acesse `https://localhost:8443`. Para a CLI pública, use
+`argocd login NOME.elb.amazonaws.com --insecure` para aceitar o certificado.
+Recupere a senha somente em terminal privado e guarde-a no Bitwarden. Confira
+KUBECONFIG/conta antes de operar. Teste login, sincronização e logs no navegador.
 
-Recupere a senha inicial somente em terminal privado, troque-a após o primeiro acesso e guarde no Bitwarden. O operador deve conferir KUBECONFIG e conta antes de qualquer comando. Para CLI remota use `argocd login DOMINIO.cloudfront.net --grpc-web`; gRPC nativo não é suportado pela origem VPC. Teste login, acompanhamento de sincronização e logs na conta real.
-
-Veja o [runbook](../../../docs/learner-lab-feira.md) para instalação, versões, acesso e recuperação. Argo CD acompanha os mesmos paths GitOps anteriores; nenhuma pipeline de release precisa mudar de diretório.
+Veja o [runbook](../../../docs/learner-lab-feira.md) para atualização do cluster
+existente com `update --migrate-argocd-public --apply`, recuperação e troca de
+conta. Argo CD preserva os paths GitOps em `clusters/us-east1`.

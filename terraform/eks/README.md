@@ -1,11 +1,10 @@
 # EKS ARM64 no Learner Lab
 
-Argo CD tem URL HTTPS CloudFront com certificado padrão e origem VPC no NLB
-privado existente (listener 81, NodePort 30081), sem outro balanceador ou domínio.
-Exige permissão CloudFront/VPC origins e a service-linked role correspondente.
-Em us-east-1, `use1-az3` não é suportada; o plano rejeita essa zona.
-Para clusters existentes use `lab.py update` e depois `update --apply`;
-esse caminho preserva os tokens Bitwarden e recusa destruição/substituição.
+Argo CD tem um NLB público separado em TCP 443 e HTTPS NodePort 30081,
+com autenticação obrigatória e certificado autoassinado. Não exige CloudFront,
+ACM ou domínio. IPv4 público em 443 é aberto a qualquer origem conforme
+configuração autorizada. Veja o runbook para `update --migrate-argocd-public`
+ao retomar o apply antigo; a exceção de destruição fica restrita à entrada do Argo.
 
 Infraestrutura nova e estado S3 separado do GKE. NÃ£o cria roles IAM: recebe
 ARNs de roles existentes com trust/permissÃµes compatÃ­veis com EKS e EC2.
