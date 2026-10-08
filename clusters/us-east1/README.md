@@ -10,4 +10,4 @@ Preserve issuer HTTPS, audience, chaves JWT e bancos durante a troca de conta. C
 
 Rolling updates usam `maxSurge: 1`, `maxUnavailable: 0`; reserve capacidade para os Pods extras. As Applications acompanham `main` com selfHeal e sem prune automático. Alteração de Secrets não reinicia Pods automaticamente.
 
-O diretório `edge` contém o template do proxy opcional; ele não faz parte das Applications Auth/Core e é aplicado pelo comando `public` do script.
+A Application `edge` reconcilia o proxy Nginx e o Service NodePort interno. Terraform cria API Gateway HTTP API com HTTPS próprio, VPC Link e NLB privado. `/api/...` encaminha à Core removendo `/api`; `/auth/...` preserva o prefixo nativo da Auth. CORS aceita quaisquer origens HTTP/HTTPS com suporte a cookies. React futuramente terá uma URL separada; não são necessários domínio próprio ou ACM.

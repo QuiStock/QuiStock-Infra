@@ -66,26 +66,46 @@ class SafetyTests(unittest.TestCase):
             obj.wait_application("api-auth")
         self.assertEqual(command.call_count, 2)
 
-    def test_public_refuses_other_account_certificate(self):
+    def publication(self):
         obj = self.instance()
         obj.kubeconfig = Mock()
-        obj.args.certificate_arn = "arn:aws:acm:us-east-1:999999999999:certificate/abc"
-        with patch.object(lab, "run") as command:
-            with self.assertRaisesRegex(RuntimeError, "belonging to this account"):
-                obj.public()
-        command.assert_not_called()
+        obj.wait_application = Mock()
+        obj.verify_public = Mock()
+        obj.outputs = Mock(return_value={
+            "edge_target_group_arn": {"value": "target-arn"},
+            "api_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com"},
+            "core_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com/api"},
+            "auth_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com/auth"}})
+        return obj
 
-    def test_public_refuses_certificate_missing_hostname(self):
-        obj = self.instance()
-        obj.kubeconfig = Mock()
-        obj.args.certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc"
-        obj.args.auth_host = "auth.example.com"
-        obj.args.core_host = "api.example.com"
-        obj.aws = Mock(return_value={"Certificate": {"Status": "ISSUED", "SubjectAlternativeNames": ["auth.example.com"]}})
-        with patch.object(lab, "run") as command:
-            with self.assertRaisesRegex(RuntimeError, "cover both"):
+    def test_public_waits_for_healthy_nlb_before_https_verification(self):
+        obj = self.publication()
+        obj.aws = Mock(side_effect=[{"TargetHealthDescriptions": []},
+                                   {"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]}])
+        with patch.object(lab, "run") as command, patch.object(lab.time, "sleep"):
+            obj.public()
+        self.assertEqual(obj.aws.call_count, 2)
+        obj.wait_application.assert_called_once_with("edge")
+        obj.verify_public.assert_called_once_with("https://fixture.execute-api.us-east-1.amazonaws.com")
+        self.assertTrue(any("edge-application.yaml" in str(c.args[0]) for c in command.call_args_list))
+
+    def test_public_refuses_to_report_ready_without_nlb_targets(self):
+        obj = self.publication()
+        obj.aws = Mock(return_value={"TargetHealthDescriptions": []})
+        with patch.object(lab, "run"), patch.object(lab.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "did not become healthy"):
                 obj.public()
-        command.assert_not_called()
+        obj.verify_public.assert_not_called()
+
+    def test_credentialed_cors_cannot_return_literal_wildcard(self):
+        obj = self.instance()
+        response = Mock(status=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"})
+        context = Mock()
+        context.__enter__ = Mock(return_value=response)
+        context.__exit__ = Mock(return_value=False)
+        with patch.object(lab.urllib.request, "urlopen", return_value=context):
+            with self.assertRaisesRegex(RuntimeError, "CORS preflight failed"):
+                obj.verify_public("https://fixture.example")
 
     def test_gitops_paths_and_arm_images_are_preserved(self):
         for app in ("api-auth", "api-core"):

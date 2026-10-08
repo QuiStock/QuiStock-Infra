@@ -7,7 +7,8 @@ import base64
 import getpass
 import json
 import os
-import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 import shutil
 import subprocess
@@ -138,7 +139,8 @@ class Lab:
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-application.yaml"])
             self.wait_application(app)
         del token
-        self.verify()
+        self.verify(include_public=False)
+        self.public()
 
     def wait_secret(self, app):
         # Query only key names; secret values never enter this process or logs.
@@ -163,7 +165,7 @@ class Lab:
             time.sleep(5)
         raise RuntimeError(f"Argo Application did not become Synced/Healthy: {app}")
 
-    def verify(self):
+    def verify(self, *, include_public=True):
         self.kubeconfig()
         nodes = json.loads(run(["kubectl", "get", "nodes", "-o", "json"], capture=True).stdout)["items"]
         if not nodes or any(n["metadata"]["labels"].get("kubernetes.io/arch") != "arm64" or
@@ -174,61 +176,55 @@ class Lab:
             self.wait_application(app)
             run(["kubectl", "rollout", "status", f"deployment/{app}", "-n", app, "--timeout=10m"])
         run(["kubectl", "get", "pods", "-A"])
-        print("Cluster and applications ready. Complete the login/JWKS/database and public HTTPS tests in the runbook.")
+        if include_public:
+            self.wait_application("edge")
+            self.verify_public(self.outputs()["api_url"]["value"])
+        print("Cluster and applications ready. Complete real login/database tests in the runbook.")
+
+    def outputs(self):
+        self.init()
+        return json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "output", "-json"], capture=True).stdout)
 
     def public(self):
-        """Optional shared Classic LB: no custom controller or IAM role creation.
-        Requires ACM certificate and permitted legacy EKS cloud-provider operations.
-        """
+        """Reconcile the GitOps proxy and verify the Terraform-owned gateway."""
         self.kubeconfig()
-        cert = self.args.certificate_arn or ""
-        if not cert.startswith(f"arn:aws:acm:{self.region}:{self.account}:certificate/"):
-            raise RuntimeError("Provide an ACM certificate ARN belonging to this account and region.")
-        hosts = [self.args.auth_host or "", self.args.core_host or ""]
-        if hosts[0] == hosts[1] or not all(re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", h) for h in hosts):
-            raise RuntimeError("Provide distinct valid --auth-host and --core-host DNS names.")
-        certificate = self.aws("acm", "describe-certificate", "--certificate-arn", cert)["Certificate"]
-        if certificate["Status"] != "ISSUED":
-            raise RuntimeError("Certificate must be ISSUED before publication.")
-        sans = certificate.get("SubjectAlternativeNames", [])
-        if not all(any(h == san or (san.startswith("*.") and h.partition(".")[2] == san[2:]) for san in sans) for h in hosts):
-            raise RuntimeError("Certificate does not cover both hostnames.")
-        conf = (ROOT / "clusters/us-east1/edge/nginx.conf").read_text().replace("AUTH_HOST", hosts[0]).replace("CORE_HOST", hosts[1])
-        resources = [
-            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "edge"}},
-            {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "edge-config", "namespace": "edge"}, "data": {"nginx.conf": conf}},
-            {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "edge", "namespace": "edge"},
-             "spec": {"replicas": 2, "selector": {"matchLabels": {"app": "edge"}}, "template": {
-                 "metadata": {"labels": {"app": "edge"}}, "spec": {"nodeSelector": {"kubernetes.io/arch": "arm64"},
-                 "containers": [{"name": "nginx", "image": "nginx:1.28.0-alpine", "ports": [{"containerPort": 8080}],
-                     "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "128Mi"}},
-                     "readinessProbe": {"httpGet": {"path": "/edge-health", "port": 8080}},
-                     "livenessProbe": {"httpGet": {"path": "/edge-health", "port": 8080}},
-                     "volumeMounts": [{"name": "config", "mountPath": "/etc/nginx/nginx.conf", "subPath": "nginx.conf"}]}],
-                 "volumes": [{"name": "config", "configMap": {"name": "edge-config"}}]}}}},
-            {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "edge", "namespace": "edge", "annotations": {
-                "service.beta.kubernetes.io/aws-load-balancer-ssl-cert": cert,
-                "service.beta.kubernetes.io/aws-load-balancer-ssl-ports": "443",
-                "service.beta.kubernetes.io/aws-load-balancer-backend-protocol": "http",
-                "service.beta.kubernetes.io/aws-load-balancer-ssl-negotiation-policy": "ELBSecurityPolicy-TLS-1-2-2017-01"}},
-             "spec": {"type": "LoadBalancer", "selector": {"app": "edge"}, "ports": [{"port": 443, "targetPort": 8080}]}}
-        ]
-        run(["kubectl", "apply", "-f", "-"], stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}))
-        run(["kubectl", "rollout", "restart", "deployment/edge", "-n", "edge"])
+        run(["kubectl", "apply", "-f", ROOT / "clusters/us-east1/bootstrap/edge-application.yaml"])
+        self.wait_application("edge")
         run(["kubectl", "rollout", "status", "deployment/edge", "-n", "edge", "--timeout=10m"])
+        outputs = self.outputs()
+        target = outputs["edge_target_group_arn"]["value"]
         for _ in range(120):
-            svc = json.loads(run(["kubectl", "get", "svc/edge", "-n", "edge", "-o", "json"], capture=True).stdout)
-            ingress = svc.get("status", {}).get("loadBalancer", {}).get("ingress", [])
-            if ingress:
-                print(f"Configure both DNS names to {ingress[0].get('hostname')}; test HTTPS before changing clients.")
-                return
+            targets = self.aws("elbv2", "describe-target-health", "--target-group-arn", target)["TargetHealthDescriptions"]
+            if targets and all(t["TargetHealth"]["State"] == "healthy" for t in targets):
+                break
             time.sleep(5)
-        raise RuntimeError("Load balancer pending. Inspect Service events and Learner Lab ELB permissions.")
+        else:
+            raise RuntimeError("Private NLB targets did not become healthy. Check NodePort 30080, security groups and edge Pods.")
+        self.verify_public(outputs["api_url"]["value"])
+        print(f"API HTTPS: {outputs['api_url']['value']}")
+        print(f"Core: {outputs['core_url']['value']}")
+        print(f"Auth: {outputs['auth_url']['value']}")
 
-    def unpublish(self):
-        self.kubeconfig()
-        run(["kubectl", "delete", "namespace", "edge", "--ignore-not-found", "--timeout=10m"])
-        print("Publication removed. Confirm the associated AWS Classic LB has disappeared before down.")
+    def verify_public(self, url):
+        # No tokens/passwords are used here. Real login remains an operator test.
+        origin = "https://development.example"
+        preflight = urllib.request.Request(url + "/auth/login", method="OPTIONS", headers={
+            "Origin": origin, "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type"})
+        for attempt in range(60):
+            try:
+                with urllib.request.urlopen(preflight, timeout=10) as response:
+                    if response.status not in (200, 204) or response.headers.get("Access-Control-Allow-Origin") != origin or response.headers.get("Access-Control-Allow-Credentials") != "true":
+                        raise RuntimeError("Credentialed CORS preflight failed; inspect HTTP API CORS configuration.")
+                for path in ("/auth/health", "/api/health/readiness", "/auth/.well-known/jwks.json"):
+                    with urllib.request.urlopen(url + path, timeout=10) as response:
+                        if response.status != 200:
+                            raise RuntimeError(f"Public routing check failed: {path}")
+                return
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == 59:
+                    raise RuntimeError("Public gateway did not become reachable/healthy; inspect VPC link and integrations.")
+                time.sleep(5)
 
     def down(self):
         if self.args.confirm_destroy != self.account:
@@ -244,7 +240,7 @@ class Lab:
         ingresses = json.loads(run(["kubectl", "get", "ingress", "-A", "-o", "json"], capture=True).stdout)["items"]
         if ingresses:
             raise RuntimeError("Remove Ingress resources and verify cloud cleanup before down.")
-        for app in ("api-core", "api-auth"):
+        for app in ("edge", "api-core", "api-auth"):
             run(["kubectl", "delete", "application", app, "-n", "argocd", "--ignore-not-found"])
         self.tf("destroy", "-input=false", "-auto-approve", f"-var-file={self.dir / 'variables.json'}")
         print("Infrastructure removed. State bucket retained for recovery/audit; check AWS for residual resources.")
@@ -252,14 +248,11 @@ class Lab:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "up", "bootstrap", "verify", "public", "unpublish", "down"))
+    parser.add_argument("command", choices=("preflight", "up", "bootstrap", "verify", "public", "down"))
     parser.add_argument("--config", required=True)
     parser.add_argument("--account", required=True)
     parser.add_argument("--apply", action="store_true", help="Apply the saved plan and bootstrap; otherwise up only plans")
     parser.add_argument("--confirm-destroy")
-    parser.add_argument("--certificate-arn")
-    parser.add_argument("--auth-host")
-    parser.add_argument("--core-host")
     args = parser.parse_args()
     lab = Lab(args)
     if args.command == "up":

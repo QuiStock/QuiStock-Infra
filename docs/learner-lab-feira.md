@@ -1,7 +1,7 @@
 # QuiStock no AWS Academy Learner Lab
 
 O diretório GitOps continua `clusters/us-east1`; a região AWS é `us-east-1`.
-As pipelines de digest não mudam. Esta infraestrutura é destinada à feira e
+As pipelines de digest não mudam. Esta infraestrutura atende desenvolvimento e feira e
 não oferece as garantias de disponibilidade de uma conta comercial permanente.
 Nenhum recurso AWS é criado pela CI. O primeiro teste depende das permissões
 efetivas do Learner Lab; não consideramos esse teste aprovado apenas com `validate`.
@@ -9,10 +9,9 @@ efetivas do Learner Lab; não consideramos esse teste aprovado apenas com `valid
 ## Preparação única, reutilizável entre laboratórios
 
 Todos os acessos têm permissões idênticas: valide um perfil de laboratório uma
-vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo, ARN do
-certificado e destinos DNS precisam ser conferidos a cada troca.
+vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo e URL do API Gateway precisam ser conferidos a cada troca.
 
-1. Confira nas instruções do curso se EKS, Graviton, S3, ELB e ACM são permitidos,
+1. Confira nas instruções do curso se EKS, Graviton, S3, ELBv2/NLB e API Gateway HTTP API/VPC Link são permitidos,
    quais tipos/tamanhos EC2 e zonas estão liberados, quotas e duração da sessão.
    Teste também o comportamento ao terminar e reiniciar a sessão; não suponha
    que encerrar a sessão encerre a cobrança ou preserve a disponibilidade.
@@ -27,6 +26,9 @@ certificado e destinos DNS precisam ser conferidos a cada troca.
    administrativo será uma EKS Access Entry para essa role; se usar uma role
    diferente, configure o AWS CLI para assumir essa role antes do bootstrap.
    Uma role compartilhada concede acesso a todos os usuários que a assumem.
+   O operador também precisa criar VPC Link, API/rotas/stage, security groups,
+   NLB/listener/target group e anexar target groups ao Auto Scaling Group dos nós.
+   Não é necessário criar uma role para um controlador Kubernetes de balanceadores.
    Use uma role administrativa diferente da role dos nós: o EKS cria uma
    Access Entry EC2_LINUX para a role dos nós e ela não pode ser STANDARD.
 4. Confirme uma versão Kubernetes em suporte padrão e as versões ARM64 dos
@@ -84,6 +86,11 @@ Não troque para um estado vazio para resolver erro de acesso ao bucket.
 
 O Terraform cria VPC/sub-redes públicas em duas zonas, Internet Gateway,
 EKS, Access Entry, add-ons e node group ARM On-Demand com capacidade fixa.
+Também cria duas sub-redes privadas (sem NAT), um NLB interno, target group
+anexado ao ASG do node group e API Gateway HTTP API com VPC Link. O ASG
+registra automaticamente novos nós no target group, inclusive após substituição.
+O NodePort 30080 aceita entrada somente do security group do NLB; o NLB
+aceita porta 80 somente do VPC Link. Não abra o NodePort para clientes externos.
 Não cria NAT, IAM roles, Karpenter, Auto Mode, autoscaler ou bancos.
 Nós têm saída pública mas não têm regra de entrada aberta ao mundo; o endpoint
 administrativo é restrito. O perfil depende de VPC CNI conseguir usar a role
@@ -93,7 +100,10 @@ de produção. A opção STANDARD evita aceitar suporte estendido automaticament
 O bootstrap instala Argo CD/Bitwarden, namespaces e solicita token Bitwarden
 com prompt oculto. Cria `bw-auth-token` em ambos os namespaces por stdin,
 aguarda as chaves de `auth-external` e `core-external`, aplica Auth, aguarda
-Synced/Healthy e só então aplica Core. Não usa `prune` automático.
+Synced/Healthy e só então aplica Core e a Application `edge`. Não usa `prune`
+automático. Kustomize gera a ConfigMap Nginx com hash, disparando um rollout
+quando a configuração muda. O script aguarda targets NLB saudáveis e testa
+preflight CORS, saúde das APIs e JWKS pela URL pública antes de reportar sucesso.
 Não configure log de depuração ou shell tracing durante bootstrap.
 
 Kubeconfig e dados Terraform ficam isolados em
@@ -114,37 +124,78 @@ Os probes Core são `/health/readiness` e `/health/liveness`; Auth usa `/health`
 para readiness e TCP para liveness. `verify` valida scheduling, chaves presentes,
 rollout e Argo, mas não substitui os testes funcionais de login/bancos/JWKS.
 
-## Entrada pública opcional para a feira
+## Entrada pública HTTPS para desenvolvimento e feira
 
-Há um proxy Nginx compartilhado com dois hostnames e um Classic Load Balancer
-HTTPS via controlador legado do EKS, sem criação de role/controller adicional.
-Essa escolha reduz dependências IAM no laboratório; o controlador legado tem
-manutenção limitada e não é a recomendação para uma conta comercial. Consulte
-[balanceamento EKS](https://docs.aws.amazon.com/eks/latest/best-practices/load-balancing.html).
-Se o laboratório não permitir ELB/ACM, esta publicação não funcionará e é um
-bloqueio para o uso público; port-forward é apenas alternativa para teste local.
+A URL é nativa da AWS: `https://API_ID.execute-api.us-east-1.amazonaws.com`.
+Não precisa de domínio próprio, DNS, certificado ACM ou computador com túnel.
+API Gateway termina o HTTPS e encaminha HTTP dentro da VPC pelo VPC Link,
+NLB interno e Service NodePort `edge`. Não há Classic LB nem controlador de
+balanceadores no Kubernetes. O Terraform gerencia todo o caminho AWS; Argo CD
+reconcilia o proxy em `clusters/us-east1/edge`.
 
-Pré-requisitos: dois nomes DNS estáveis, certificado ACM emitido na conta e
-região atuais cobrindo ambos, controle do DNS fora da conta temporária e
-permissão para o serviço EKS provisionar Classic LB e security groups.
-O certificado não é criado pelo script: solicite/valide no ACM previamente,
-ou importe certificado autorizado se o laboratório permitir. Sem acesso a
-ACM, planeje um terminador HTTPS externo antes da feira.
+Rotas públicas e paths recebidos pelos serviços:
+
+| Público | Destino interno |
+| --- | --- |
+| `/api/products` | Core `/products` |
+| `/api/chat` | Core `/chat` |
+| `/auth/login`, `/auth/refresh`, `/auth/logout` | Auth, preservando `/auth/...` |
+| `/auth/health` | Auth `/health` |
+| `/auth/.well-known/jwks.json` | Auth `/.well-known/jwks.json` |
+
+Core não tem prefixo `/api`; Auth já possui `/auth` no controller. O Nginx remove
+apenas o prefixo da Core e mapeia explicitamente saúde/JWKS da Auth. Método,
+corpo, query strings, Authorization, Cookie e múltiplos Set-Cookie são preservados.
+A integração sobrescreve o path com `$request.path`, evitando prefixo de stage.
+A raiz `/` não publica um website nesta PR. React futuramente terá sua própria
+URL (S3/CloudFront) e usará a URL base do API Gateway na configuração.
+
+`up --apply` já provisiona e publica as APIs. Para retomar só o proxy/verificação:
 
 ```bash
-python scripts/learner-lab/lab.py public --config .learner-lab/config.json --account ACCOUNT_ID --certificate-arn ARN_ACM --auth-host auth.example.com --core-host api.example.com
+python scripts/learner-lab/lab.py public --config .learner-lab/config.json --account ACCOUNT_ID
 ```
 
-O comando instala dois proxies ARM e um Service HTTPS com TLS no ELB. Depois
-aponte os dois CNAMEs para o hostname exibido. O template está em
-`clusters/us-east1/edge/nginx.conf`; a publicação é gerenciada pelo script,
-separadamente das Applications, porque certificado e DNS dependem da conta.
-Não use hostnames AWS como issuer JWT. Confira SANs do certificado, CORS,
-URLs do aplicativo, HTTPS, login e operação autenticada. O proxy preserva paths
-e envia `X-Forwarded-Proto: https`; aplicações devem aceitar esse cabeçalho.
-O endpoint `/edge-health` só testa o proxy; probes das APIs continuam necessários.
-Esse perfil não inclui WAF, rate limit de borda ou uma política de disponibilidade
-comercial. Fixe também digests dos componentes auxiliares após o ensaio.
+O comando não solicita certificado/hostnames; reconcilia `edge`, aguarda targets
+saudáveis e exibe as URLs base de Core/Auth. `verify` confere as APIs, Application
+edge, preflight CORS e endpoints públicos. Teste também login real, refresh,
+logout, autorização e operação autenticada na Core: saúde não substitui esses testes.
+
+### CORS e clientes
+
+CORS aceita qualquer origem HTTP/HTTPS, incluindo localhost, sem allowlist de IP.
+Usamos `http://*` e `https://*` com credenciais permitidas, porque a Auth atual
+emite cookies HttpOnly e o wildcard literal `*` é incompatível com cookies no
+navegador. API Gateway responde a preflight e fornece os headers CORS; o proxy
+remove Origin no encaminhamento para evitar uma segunda política no Spring.
+Authorization e Content-Type estão explicitamente liberados. A autenticação
+permanece nas aplicações; não há authorizer IAM/JWT adicional no API Gateway.
+
+Para React com cookies, usar `credentials: 'include'` (fetch) ou
+`withCredentials: true` (Axios). A Auth é configurada com cookies Secure,
+SameSite=None e Path=/, sem domínio fixo. Navegadores que bloqueiam cookies de
+terceiros ainda podem impedir login entre frontend/API de domínios distintos:
+ensaiar no navegador alvo; CORS não elimina essa política do navegador.
+CORS aberto também permite sites terceiros fazerem requisições com credenciais
+quando o navegador as permite; autenticação não torna CORS uma barreira de segurança.
+Clientes mobile nativos não dependem de CORS e devem administrar cookies/tokens
+conforme o contrato de autenticação da API.
+
+O endpoint administrativo EKS continua restrito por `admin_cidrs`: isso não
+restringe os usuários das APIs. IPs de clientes mobile podem variar normalmente.
+Mantenha um issuer JWT HTTPS idêntico em Auth/Core; o issuer é um identificador,
+e não deve ser alterado automaticamente junto com a URL pública ao trocar de conta.
+A Core continua consultando JWKS por DNS interno.
+
+Há limites: HTTP API tem timeout de integração de 30s e limite de payload;
+a configuração inicial aplica 50 requisições/s com burst 100. Ajustar e testar
+para a carga real da feira, observando créditos e quotas. Não há garantia de
+funcionamento além da duração/créditos/permissões do Learner Lab. VPC Link sem
+tráfego por longo período pode ficar INACTIVE e precisar recriar ENIs ao receber
+tráfego novamente; ensaiar e aquecer o ambiente antes da apresentação.
+API Gateway e NLB têm custos além do EKS; uma URL AWS não significa hospedagem gratuita.
+Consulte [integração privada](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-private.html)
+e [CORS](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-cors.html).
 
 ## Recuperação e troca de conta
 
@@ -156,16 +207,19 @@ após rotação use rollout restart e valide a aplicação.
 
 Na próxima conta: inicie a sessão, configure novas credenciais, confirme o ID,
 reutilize a configuração validada (atualize IP administrativo quando necessário),
-execute preflight/up e prepare o certificado ACM. Não copie state ou kubeconfig
-da conta anterior. Publique e teste o novo endpoint antes de trocar o DNS.
-Reserve uma sobreposição curta; preserve a conta antiga para rollback até
-expirar o TTL e validar clientes. Sessões/token/certificado permanecem específicos
-de cada conta mesmo com permissões idênticas.
+execute preflight/up. Não copie state ou kubeconfig da conta anterior.
+Teste o novo endpoint e atualize a URL base nos clientes mobile e no frontend.
+Não há troca de DNS: a API nova terá outro ID/hostname. Reserve uma sobreposição
+curta e preserve a conta antiga para rollback até validar os clientes.
+Sessões, tokens e endpoints permanecem específicos de cada conta mesmo com
+permissões idênticas. A expiração das credenciais do operador não deve ser
+confundida com a duração da disponibilidade dos recursos: verificar o comportamento
+do laboratório ao encerrar a sessão.
 
 Não espere crédito zerar: reserve crédito para ensaio, recuperação e sobreposição.
 O número de contas ainda é indefinido e cada uma tem orçamento independente.
 EKS em suporte padrão custa US$0,10/h só pelo control plane; some EC2, EBS,
-IPv4, ELB, S3 e tráfego ([preços](https://aws.amazon.com/eks/pricing/)).
+IPv4, NLB, API Gateway, S3 e tráfego ([preços](https://aws.amazon.com/eks/pricing/)).
 US$50 não significam 500 horas de ambiente completo. Confira o saldo no portal
 Learner Lab, pois APIs de Billing/Budgets podem estar restritas e os dados atrasados.
 Registre custo/hora observado e duração das sessões após o primeiro ensaio.
@@ -173,13 +227,13 @@ Registre custo/hora observado e duração das sessões após o primeiro ensaio.
 ## Desmontagem
 
 ```bash
-python scripts/learner-lab/lab.py unpublish --config .learner-lab/config.json --account ACCOUNT_ID
-# Confirme no AWS console que o ELB foi excluído.
 python scripts/learner-lab/lab.py down --config .learner-lab/config.json --account ACCOUNT_ID --confirm-destroy ACCOUNT_ID
 ```
 
 `down` recusa apagar infraestrutura enquanto houver Services LoadBalancer ou
-Ingress. Retira Applications e destrói a infraestrutura daquela conta. A
+Ingress externos ao perfil. Retira Applications edge/Core/Auth e destrói a
+infraestrutura daquela conta, inclusive HTTP API, VPC Link, NLB e attachments
+do ASG. Não há comando `unpublish` nem limpeza manual do NLB deste perfil. A
 confirmação com ID autoriza destruição sem prompt adicional. Se o cluster não
 estiver acessível, recupere acesso primeiro ou faça recuperação manual com
 plano Terraform revisado e conferência dos recursos de nuvem.
