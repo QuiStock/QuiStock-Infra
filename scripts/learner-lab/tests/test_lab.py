@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch, Mock
@@ -13,7 +14,7 @@ class SafetyTests(unittest.TestCase):
     def instance(self):
         obj = lab.Lab.__new__(lab.Lab)
         obj.account = "123456789012"
-        obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False)
+        obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False, migrate_website=False)
         obj.argocd_tls_context = Mock(return_value=Mock())
         obj.config = {"cluster_name": "quistock"}
         obj.region = "us-east-1"
@@ -92,6 +93,7 @@ class SafetyTests(unittest.TestCase):
         obj.wait_application = Mock()
         obj.verify_public = Mock()
         obj.verify_argocd = Mock()
+        obj.migrate_website = Mock()
         obj.outputs = Mock(return_value={
             "edge_target_group_arn": {"value": "target-arn"},
             "api_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com"},
@@ -103,20 +105,102 @@ class SafetyTests(unittest.TestCase):
         obj = self.publication()
         obj.aws = Mock(side_effect=[{"TargetHealthDescriptions": []},
                                    {"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]}])
-        with patch.object(lab, "run") as command, patch.object(lab.time, "sleep"):
+        with patch.object(lab, "validate_manifests"), patch.object(lab, "run") as command, patch.object(lab.time, "sleep"):
             obj.public()
         self.assertEqual(obj.aws.call_count, 2)
-        obj.wait_application.assert_called_once_with("edge")
+        obj.wait_application.assert_called_once_with("website")
         obj.verify_public.assert_called_once_with("https://fixture.execute-api.us-east-1.amazonaws.com")
-        self.assertTrue(any("edge-application.yaml" in str(c.args[0]) for c in command.call_args_list))
+        self.assertTrue(any("website-application.yaml" in str(c.args[0]) for c in command.call_args_list))
 
     def test_public_refuses_to_report_ready_without_nlb_targets(self):
         obj = self.publication()
         obj.aws = Mock(return_value={"TargetHealthDescriptions": []})
-        with patch.object(lab, "run"), patch.object(lab.time, "sleep"):
+        with patch.object(lab, "validate_manifests"), patch.object(lab, "run"), patch.object(lab.time, "sleep"):
             with self.assertRaisesRegex(RuntimeError, "did not become healthy"):
                 obj.public()
         obj.verify_public.assert_not_called()
+
+    def test_draft_placeholders_stop_before_cloud_preflight(self):
+        obj = self.instance()
+        obj.aws = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "clusters/us-east1/apps/website/deployment.yaml"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("image: REPLACE_WITH_WEBSITE_ARM64_IMAGE_DIGEST", encoding="utf-8")
+            with patch.object(lab, "ROOT", root), self.assertRaisesRegex(RuntimeError, "placeholders"):
+                obj.preflight()
+        obj.aws.assert_not_called()
+
+    def test_chatbot_secret_wait_requires_its_mapped_credentials(self):
+        obj = self.instance()
+        keys = "GEMINI_API_KEY GROQ_API_KEY HF_TOKEN JWT_SECRET POSTGRES_DSN MONGODB_URI MONGODB_DB QDRANT_URL QDRANT_API_KEY REDIS_URL".split()
+        with patch.object(lab, "run", side_effect=[Mock(returncode=0, stdout="JWT_SECRET\n"),
+                                                 Mock(returncode=0, stdout="\n".join(keys))]) as command, \
+             patch.object(lab.time, "sleep"):
+            obj.wait_secret("api-chatbot")
+        self.assertEqual(command.call_count, 2)
+        self.assertIn("chatbot-external", command.call_args.args[0])
+
+    def test_website_migration_requires_explicit_flag_before_mutation(self):
+        obj = self.instance()
+        with patch.object(lab, "run", side_effect=[Mock(stdout="service/edge"), Mock(stdout="application/edge"),
+                                                 Mock(stdout="deployment/edge")]) as command:
+            with self.assertRaisesRegex(RuntimeError, "migrate-website"):
+                obj.migrate_website()
+        self.assertTrue(all(c.args[0][1] == "get" for c in command.call_args_list))
+
+    def test_website_migration_releases_nodeport_without_deleting_namespace(self):
+        obj = self.instance()
+        obj.args.migrate_website = True
+        with patch.object(lab, "run", side_effect=[Mock(stdout="service/edge"), Mock(stdout="application/edge"),
+                                                 Mock(stdout="deployment/edge"), Mock(), Mock(), Mock(), Mock()]) as command:
+            obj.migrate_website()
+        mutations = [c.args[0] for c in command.call_args_list[3:]]
+        self.assertEqual(mutations[0][1:4], ["patch", "application", "edge"])
+        self.assertIn('{"metadata":{"finalizers":[]}}', mutations[0])
+        self.assertEqual([args[2] for args in mutations[1:]], ["application", "service", "deployment"])
+        self.assertFalse(any("namespace" in args or "secret" in args for args in mutations))
+
+    def test_website_migration_resumes_when_only_old_deployment_remains(self):
+        obj = self.instance()
+        obj.args.migrate_website = True
+        with patch.object(lab, "run", side_effect=[Mock(stdout=""), Mock(stdout=""), Mock(stdout="deployment/edge"),
+                                                 Mock(), Mock()]) as command:
+            obj.migrate_website()
+        self.assertEqual(command.call_args.args[0][1:4], ["delete", "deployment", "edge"])
+
+    def test_website_migration_is_noop_on_new_cluster(self):
+        obj = self.instance()
+        with patch.object(lab, "run", return_value=Mock(stdout="")) as command:
+            obj.migrate_website()
+        self.assertEqual(command.call_count, 3)
+        self.assertTrue(all(c.args[0][1] == "get" for c in command.call_args_list))
+
+    def test_public_preserves_legacy_entry_when_remote_outputs_are_unavailable(self):
+        obj = self.publication()
+        obj.outputs.side_effect = RuntimeError("State bucket unavailable")
+        with patch.object(lab, "validate_manifests"), self.assertRaisesRegex(RuntimeError, "State bucket"):
+            obj.public()
+        obj.migrate_website.assert_not_called()
+
+    def test_bootstrap_installs_tokens_and_applications_for_all_internal_services(self):
+        obj = self.instance()
+        obj.kubeconfig = Mock()
+        obj.argocd = Mock()
+        obj.outputs = Mock(return_value={})
+        obj.wait_secret = Mock()
+        obj.wait_application = Mock()
+        obj.verify = Mock()
+        obj.public = Mock()
+        with patch.object(lab, "validate_manifests"), patch.object(lab.getpass, "getpass", return_value="fixture"), \
+             patch.object(lab, "run") as command:
+            obj.bootstrap()
+        secrets = [json.loads(c.kwargs["stdin"]) for c in command.call_args_list if "stdin" in c.kwargs]
+        self.assertEqual([s["metadata"]["namespace"] for s in secrets], list(lab.SECRET_APPS))
+        self.assertEqual([c.args[0] for c in obj.wait_secret.call_args_list], list(lab.SECRET_APPS))
+        self.assertEqual([c.args[0] for c in obj.wait_application.call_args_list], list(lab.SECRET_APPS))
+        obj.public.assert_called_once_with()
 
     def test_update_only_reconciles_argocd_after_successful_apply(self):
         obj = self.instance()

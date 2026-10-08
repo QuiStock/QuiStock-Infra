@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: edge
+  name: website
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
-      app: edge
+      app: website
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -15,13 +15,13 @@ spec:
   template:
     metadata:
       labels:
-        app: edge
+        app: website
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
       containers:
         - name: nginx
-          image: nginx:1.28.0-alpine
+          image: REPLACE_WITH_WEBSITE_ARM64_IMAGE_DIGEST
           ports:
             - name: http
               containerPort: 8080
@@ -33,11 +33,11 @@ spec:
               memory: 128Mi
           readinessProbe:
             httpGet:
-              path: /edge-health
+              path: /website-health
               port: http
           livenessProbe:
             httpGet:
-              path: /edge-health
+              path: /website-health
               port: http
           volumeMounts:
             - name: config
@@ -46,4 +46,4 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: edge-config
+            name: website-config

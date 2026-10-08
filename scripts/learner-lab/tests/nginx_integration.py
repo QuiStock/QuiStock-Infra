@@ -1,14 +1,13 @@
-"""Exercise the real Nginx config with HTTP fixtures on a Linux Docker host.
+"""Exercise the real Nginx config with HTTP fixtures on a Docker host.
 
 No AWS resources, credentials, or application databases are used.
 """
 import http.server
+import inspect
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
-import threading
 import time
 import unittest
 import urllib.error
@@ -43,33 +42,52 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         pass
 
 
-@unittest.skipUnless(os.name == "posix", "Real proxy integration runs on the Linux CI Docker host")
 class ProxyIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.servers = []
         cls.container = "quistock-proxy-test-" + uuid.uuid4().hex[:12]
-        for service in ("core", "auth"):
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
-            server.service = service
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-            cls.servers.append(server)
-        conf = (ROOT / "clusters/us-east1/edge/nginx.conf").read_text(encoding="utf-8-sig")
-        conf = conf.replace("kube-dns.kube-system.svc.cluster.local", "127.0.0.1")
-        conf = conf.replace("api-core.api-core.svc.cluster.local", f"127.0.0.1:{cls.servers[0].server_port}")
-        conf = conf.replace("api-auth.api-auth.svc.cluster.local", f"127.0.0.1:{cls.servers[1].server_port}")
+        cls.fixture = cls.container + "-fixture"
+        cls.network = cls.container + "-network"
         cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.cleanup)
+        fixture_script = Path(cls.temp.name) / "fixture.py"
+        fixture_script.write_text(
+            "import http.server, json, threading, time\n" + inspect.getsource(Fixture) +
+            "\nfor service, port in [('core', 8081), ('auth', 8082)]:\n"
+            "    server = http.server.ThreadingHTTPServer(('0.0.0.0', port), Fixture)\n"
+            "    server.service = service\n"
+            "    threading.Thread(target=server.serve_forever, daemon=True).start()\n"
+            "while True: time.sleep(60)\n", encoding="utf-8")
+        conf = (ROOT / "clusters/us-east1/apps/website/nginx.conf").read_text(encoding="utf-8-sig")
+        conf = conf.replace("kube-dns.kube-system.svc.cluster.local", "127.0.0.11")
+        conf = conf.replace("api-core.api-core.svc.cluster.local", cls.fixture + ":8081")
+        conf = conf.replace("api-auth.api-auth.svc.cluster.local", cls.fixture + ":8082")
         path = Path(cls.temp.name) / "nginx.conf"
         path.write_text(conf, encoding="utf-8")
-        cls.addClassCleanup(cls.cleanup)
-        subprocess.run(["docker", "run", "-d", "--rm", "--network", "host", "--name", cls.container,
+        html = Path(cls.temp.name) / "html"
+        html.mkdir()
+        (html / "index.html").write_text('<html><div id="root">React fixture</div></html>', encoding="utf-8")
+        (html / "assets").mkdir()
+        (html / "assets/app.js").write_text('console.log("fixture");', encoding="utf-8")
+        subprocess.run(["docker", "network", "create", cls.network], check=True, stdout=subprocess.PIPE)
+        subprocess.run(["docker", "run", "-d", "--rm", "--network", cls.network,
+                        "--name", cls.fixture, "--mount",
+                        f"type=bind,source={fixture_script},target=/fixture.py,readonly",
+                        "python:3.12-alpine", "python", "/fixture.py"], check=True, stdout=subprocess.PIPE)
+        subprocess.run(["docker", "run", "-d", "--rm", "--network", cls.network,
+                        "-p", "127.0.0.1::8080", "--name", cls.container,
+                        "--mount", f"type=bind,source={html},target=/usr/share/nginx/html,readonly",
                         "--mount", f"type=bind,source={path},target=/etc/nginx/nginx.conf,readonly",
-                        "nginx:1.28.0-alpine"], check=True)
+                        "nginx:1.28.0-alpine"], check=True, stdout=subprocess.PIPE)
+        port = subprocess.check_output(["docker", "port", cls.container, "8080/tcp"], text=True).strip().rsplit(":", 1)[1]
+        cls.url = "http://127.0.0.1:" + port
         for _ in range(60):
             try:
-                with urllib.request.urlopen("http://127.0.0.1:8080/edge-health", timeout=1) as r:
-                    if r.status == 200:
-                        return
+                for route in ("/website-health", "/auth/health", "/api/health/readiness"):
+                    with urllib.request.urlopen(cls.url + route, timeout=1) as response:
+                        if response.status != 200:
+                            raise RuntimeError("Fixture is not ready")
+                return
             except (urllib.error.URLError, TimeoutError):
                 time.sleep(1)
         subprocess.run(["docker", "logs", cls.container], check=False)
@@ -77,14 +95,12 @@ class ProxyIntegration(unittest.TestCase):
 
     @classmethod
     def cleanup(cls):
-        subprocess.run(["docker", "rm", "-f", cls.container], check=False)
-        for server in cls.servers:
-            server.shutdown()
-            server.server_close()
+        subprocess.run(["docker", "rm", "-f", cls.container, cls.fixture], check=False, stdout=subprocess.PIPE)
+        subprocess.run(["docker", "network", "rm", cls.network], check=False, stdout=subprocess.PIPE)
         cls.temp.cleanup()
 
     def request(self, path, method="GET", body=None):
-        req = urllib.request.Request("http://127.0.0.1:8080" + path, method=method,
+        req = urllib.request.Request(self.url + path, method=method,
                                      data=body.encode() if body is not None else None,
                                      headers={"Authorization": "Bearer fixture", "Cookie": "refresh_token=fixture",
                                               "Origin": "https://any-site.example", "Content-Type": "application/json"})
@@ -121,11 +137,23 @@ class ProxyIntegration(unittest.TestCase):
                 result, _ = self.request(public)
                 self.assertEqual((result["service"], result["path"]), (service, native))
 
-    def test_unknown_paths_do_not_leak_into_apis(self):
-        for path in ("/", "/apix/products", "/authentication/login"):
+    def test_spa_fallback_and_static_assets(self):
+        for path in ("/", "/home", "/apix/products", "/authentication/login"):
+            with self.subTest(path=path), urllib.request.urlopen(self.url + path, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn(b"React fixture", response.read())
+                self.assertIn("text/html", response.headers["Content-Type"])
+        with urllib.request.urlopen(self.url + "/assets/app.js", timeout=5) as response:
+            self.assertIn(b"console.log", response.read())
+        with urllib.request.urlopen(self.url + "/index.html", timeout=5) as response:
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_unknown_assets_return_404(self):
+        for path in ("/assets/missing.js",):
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
                 self.request(path)
             self.assertEqual(error.exception.code, 404)
+            error.exception.close()
 
 
 if __name__ == "__main__":

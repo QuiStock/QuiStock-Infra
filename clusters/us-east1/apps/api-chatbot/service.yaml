@@ -1,14 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: edge
+  name: api-chatbot
+  namespace: api-chatbot
 spec:
-  type: NodePort
-  externalTrafficPolicy: Cluster
+  type: ClusterIP
   selector:
-    app: edge
+    app: api-chatbot
   ports:
     - name: http
       port: 80
       targetPort: http
-      nodePort: 30080

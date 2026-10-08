@@ -75,7 +75,7 @@ resource "aws_lb_listener" "edge" {
   }
 }
 # ASG attachment automatically registers replacement nodes; never record EC2 IDs
-# or transient Pod IPs. NodePort 30080 is fixed in the edge GitOps Service.
+# or transient Pod IPs. NodePort 30080 is fixed in the website GitOps Service.
 resource "aws_autoscaling_attachment" "edge" {
   autoscaling_group_name = aws_eks_node_group.arm.resources[0].autoscaling_groups[0].name
   lb_target_group_arn    = aws_lb_target_group.edge.arn
@@ -110,7 +110,7 @@ resource "aws_apigatewayv2_integration" "edge" {
   request_parameters     = { "overwrite:path" = "$request.path" }
 }
 resource "aws_apigatewayv2_route" "edge" {
-  for_each           = toset(["ANY /api", "ANY /api/{proxy+}", "ANY /auth", "ANY /auth/{proxy+}"])
+  for_each           = toset(["ANY /api", "ANY /api/{proxy+}", "ANY /auth", "ANY /auth/{proxy+}", "$default"])
   api_id             = aws_apigatewayv2_api.edge.id
   route_key          = each.value
   target             = "integrations/${aws_apigatewayv2_integration.edge.id}"

@@ -1,15 +1,45 @@
-# API Auth e API Core no EKS
+# QuiStock: quatro aplicações no EKS
 
-O estado desejado continua em `clusters/us-east1`, preservando os paths das pipelines de release. A região AWS do perfil inicial é `us-east-1`.
+Terraform mantém EKS, rede, add-ons, dois NLBs e API Gateway. O script instala
+Argo CD e Bitwarden e configura o token inicial. Argo reconcilia Auth, Core,
+chatbot e website; não provisiona recursos AWS.
 
-Consulte o [runbook Learner Lab](../../docs/learner-lab-feira.md) para provisionamento, bootstrap, Secrets, entrada HTTPS, recuperação e troca de conta. O script instala Bitwarden e Argo CD e aplica Auth antes de Core.
+```text
+Browser/mobile → API Gateway HTTPS → VPC Link → NLB privado → website Nginx
+                                                             /      → React
+                                                             /api   → Core
+                                                             /auth  → Auth
+Core ↔ chatbot via Services internos (integração de aplicação pendente)
+Browser → NLB público HTTPS → Argo CD (login obrigatório)
+```
 
-Argo CD tem um NLB público separado em TCP 443, com HTTPS próprio, login obrigatório e certificado autoassinado. O Helm configura HTTPS NodePort 30081 e a URL real do painel. A migração da tentativa CloudFront usa `lab.py update --migrate-argocd-public --apply`, preservando tokens Bitwarden e o cluster.
+Website e APIs compartilham a URL automática `execute-api`. O Argo mantém a
+URL `elb.amazonaws.com` com certificado autoassinado. Não há domínio próprio,
+CloudFront, ACM, controlador de Ingress ou LoadBalancer criado pelo Kubernetes.
 
-Ambas as APIs usam `kubernetes.io/arch: arm64`, Services ClusterIP e imagens GHCR por digest. Auth lê `auth-external`; Core lê `core-external`; os dois Secrets são sincronizados pelo operador Bitwarden e exigem `bw-auth-token` no respectivo namespace. Os UUIDs dos manifests não são valores secretos.
+| Application Argo | Service | Secrets |
+| --- | --- | --- |
+| api-auth | ClusterIP, porta 80 → 8080 | auth-external |
+| api-core | ClusterIP, porta 80 → 8080 | core-external |
+| api-chatbot | ClusterIP, porta 80 → 8000 | chatbot-external |
+| website | NodePort 30080 → 8080, somente NLB privado | nenhum |
 
-Preserve issuer HTTPS, audience, chaves JWT e bancos durante a troca de conta. Core obtém JWKS por `http://api-auth.api-auth.svc.cluster.local/.well-known/jwks.json`. Auth usa readiness `/health` e liveness TCP; Core usa `/health/readiness` e `/health/liveness`. Integração ERP permanece desligada no perfil atual.
+As imagens de Auth/Core e seus paths de release permanecem. Website/chatbot
+são estruturas com placeholders autorizados: preencha os digests ARM64 e IDs
+Bitwarden antes de executar preflight/up/bootstrap/public. Veja os contratos
+em [website](apps/website/README.md) e [chatbot](apps/api-chatbot/README.md).
 
-Rolling updates usam `maxSurge: 1`, `maxUnavailable: 0`; reserve capacidade para os Pods extras. As Applications acompanham `main` com selfHeal e sem prune automático. Alteração de Secrets não reinicia Pods automaticamente.
+Core recebe `/api/products` como `/products`; Auth recebe `/auth/login` como
+`/auth/login`, conforme sua imagem atual. Core consulta JWKS por DNS interno.
+CORS continua aberto para origens HTTP/HTTPS com cookies. Os novos Services
+habilitam conectividade interna; as aplicações ainda precisam implementar a
+integração Core/chatbot e compatibilizar sua autenticação.
 
-A Application `edge` reconcilia o proxy Nginx e o Service NodePort interno. Terraform cria API Gateway HTTP API com HTTPS próprio, VPC Link e NLB privado. `/api/...` encaminha à Core removendo `/api`; `/auth/...` preserva o prefixo nativo da Auth. CORS aceita quaisquer origens HTTP/HTTPS com suporte a cookies. React futuramente terá uma URL separada; não são necessários domínio próprio ou ACM.
+Applications acompanham main, com selfHeal e sem prune automático. Bitwarden
+atualiza Secrets sem reiniciar Pods: faça rollout após rotação. Não coloque
+secrets no build React. O website serve arquivos React e faz o proxy no mesmo
+container, substituindo o Deployment edge.
+
+O [runbook](../../docs/learner-lab-feira.md) descreve reconstrução e migração.
+Os endereços Terraform `edge` e a saúde `/edge-health` são mantidos para
+reaproveitar o estado e o NLB existente, sem substituição de recursos AWS.

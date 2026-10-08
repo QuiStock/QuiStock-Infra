@@ -56,8 +56,8 @@ run "private_gateway_contract" {
     error_message = "Integration must use the VPC link without injecting a stage prefix."
   }
   assert {
-    condition     = length(aws_apigatewayv2_route.edge) == 4 && alltrue([for r in aws_apigatewayv2_route.edge : r.authorization_type == "NONE"])
-    error_message = "Both base and nested paths must preserve application-owned authentication."
+    condition     = length(aws_apigatewayv2_route.edge) == 5 && contains(keys(aws_apigatewayv2_route.edge), "$default") && alltrue([for r in aws_apigatewayv2_route.edge : r.authorization_type == "NONE"])
+    error_message = "Website fallback and API paths must preserve application-owned authentication."
   }
   assert {
     condition     = aws_apigatewayv2_api.edge.cors_configuration[0].allow_credentials && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_origins, "http://*") && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_origins, "https://*") && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_headers, "authorization")
