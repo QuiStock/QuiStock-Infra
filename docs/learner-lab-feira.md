@@ -31,6 +31,12 @@ vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo e URL do API
    Não é necessário criar uma role para um controlador Kubernetes de balanceadores.
    Use uma role administrativa diferente da role dos nós: o EKS cria uma
    Access Entry EC2_LINUX para a role dos nós e ela não pode ser STANDARD.
+   O Learner Lab pode negar `iam:GetRole` para `voclabs`; o preflight não consulta
+   os detalhes dessa role. `admin_role_name: voclabs` monta o ARN com a conta de
+   destino e path IAM padrão. Se a role tiver outro path, informe
+   `admin_role_arn` explicitamente com o ARN IAM completo, que tem prioridade.
+   Isso não modifica IAM nem contorna o deny. A permissão de criar Access Entries
+   e a existência do principal serão verificadas pelo EKS durante o apply.
 4. Confirme uma versão Kubernetes em suporte padrão e as versões ARM64 dos
    add-ons. `aws eks describe-addon-versions --kubernetes-version VERSAO`
    lista compatibilidades. O exemplo exige preenchimento explícito dessas versões.
