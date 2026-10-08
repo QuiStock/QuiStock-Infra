@@ -36,6 +36,25 @@ class SafetyTests(unittest.TestCase):
             obj.down()
         obj.init.assert_not_called()
 
+    def test_admin_principal_does_not_inspect_restricted_iam_role(self):
+        obj = self.instance()
+        obj.config["admin_role_name"] = "voclabs"
+        obj.aws = Mock()
+        self.assertEqual(obj.admin_principal(), "arn:aws:iam::123456789012:role/voclabs")
+        obj.aws.assert_not_called()
+
+    def test_explicit_admin_arn_preserves_nondefault_iam_path(self):
+        obj = self.instance()
+        obj.config["admin_role_arn"] = "arn:aws:iam::123456789012:role/lab/operator"
+        self.assertEqual(obj.admin_principal(), obj.config["admin_role_arn"])
+
+    def test_admin_principal_rejects_other_accounts_and_session_arns(self):
+        obj = self.instance()
+        for arn in ("arn:aws:iam::999999999999:role/voclabs", "arn:aws:sts::123456789012:assumed-role/voclabs/session"):
+            with self.subTest(arn=arn), self.assertRaisesRegex(RuntimeError, "target account"):
+                obj.config["admin_role_arn"] = arn
+                obj.admin_principal()
+
     def test_destroy_refuses_load_balancer(self):
         obj = self.instance()
         obj.args.confirm_destroy = obj.account

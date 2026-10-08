@@ -7,6 +7,7 @@ import base64
 import getpass
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -55,13 +56,25 @@ class Lab:
     def tf(self, *args):
         return run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", *args])
 
+    def admin_principal(self):
+        # Learner Lab denies GetRole on voclabs. Building a configured principal
+        # does not inspect or change IAM; EKS validates it when creating access.
+        arn = self.config.get("admin_role_arn")
+        if not arn:
+            name = self.config.get("admin_role_name", "")
+            arn = f"arn:aws:iam::{self.account}:role/{name}"
+        if not re.fullmatch(rf"arn:aws:iam::{self.account}:role/[A-Za-z0-9_+=,.@/-]+", arn):
+            raise RuntimeError("Administrative principal must be an IAM role ARN in the target account, not an STS session ARN.")
+        return arn
+
     def preflight(self):
         print(f"Target: {self.account} / {self.region} / {self.config['cluster_name']}")
         variables = {k: self.config[k] for k in (
             "region", "cluster_name", "kubernetes_version", "availability_zones",
             "admin_cidrs", "instance_types", "node_count", "addon_versions")}
         variables["account_id"] = self.account
-        for kind in ("cluster", "node", "admin"):
+        variables["admin_role_arn"] = self.admin_principal()
+        for kind in ("cluster", "node"):
             role = self.aws("iam", "get-role", "--role-name", self.config[f"{kind}_role_name"])["Role"]
             variables[f"{kind}_role_arn"] = role["Arn"]
             if kind != "admin":

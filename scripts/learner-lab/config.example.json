@@ -4,7 +4,7 @@
   "kubernetes_version": "REPLACE_WITH_STANDARD_SUPPORT_VERSION",
   "cluster_role_name": "LabRole",
   "node_role_name": "LabRole",
-  "admin_role_name": "REPLACE_WITH_OPERATOR_IAM_ROLE_NAME",
+  "admin_role_name": "voclabs",
   "availability_zones": ["us-east-1a", "us-east-1b"],
   "admin_cidrs": ["REPLACE_WITH_OPERATOR_PUBLIC_IP/32"],
   "instance_types": ["t4g.medium"],
