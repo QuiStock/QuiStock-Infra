@@ -57,6 +57,23 @@ O script recusa placeholders antes de provisionar. Secrets ficam fora do Git
 e do Terraform. O token Bitwarden inicial é solicitado por prompt oculto e
 criado em cada namespace por stdin. Não use shell tracing/log de depuração.
 
+### Publicar website e chatbot antes de aplicar o Infra
+
+As PRs [AI_Multi-Agent #26](https://github.com/QuiStock/AI_Multi-Agent/pull/26)
+e [quistock-dad #14](https://github.com/QuiStock/quistock-dad/pull/14) publicam
+imagens ARM64 em releases estáveis ou pelo workflow manual de publicação.
+Integre essas PRs nos respectivos serviços. Para preparar o Infra ainda em PR,
+execute a publicação com `infra_ref=codex/simplify-four-apps`; após o merge
+do Infra, use `main`.
+
+Com `INFRA_REPO_TOKEN` configurado no serviço, a publicação abre uma PR de
+digest para a branch indicada. Sem esse token, copie do resumo da execução
+as referências `ghcr.io/quistock/web-frontend@sha256:...` e
+`ghcr.io/quistock/ai-multi-agent@sha256:...` para os manifests. Confira que os
+pacotes GHCR estão públicos, ou configure imagePullSecrets. Complete os IDs
+Bitwarden, integre os digests na PR de Infra e mescle em main antes do bootstrap.
+Esses workflows não executam Terraform nem modificam Secrets.
+
 ## Recriação do zero
 
 ```bash
