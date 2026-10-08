@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-chatbot
+  namespace: api-chatbot
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: api-chatbot
+  template:
+    metadata:
+      labels:
+        app: api-chatbot
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api-chatbot
+          image: REPLACE_WITH_CHATBOT_ARM64_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: AUTH_BYPASS_LOCAL_TESTS
+              value: "false"
+          envFrom:
+            - secretRef:
+                name: chatbot-external
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            timeoutSeconds: 20
+            periodSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

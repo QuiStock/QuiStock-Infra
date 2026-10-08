@@ -18,6 +18,17 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+SECRET_APPS = ("api-auth", "api-core", "api-chatbot")
+APPS = (*SECRET_APPS, "website")
+
+
+def validate_manifests():
+    """Fail before provisioning if the draft application contracts are incomplete."""
+    missing = [str(path.relative_to(ROOT)) for path in (ROOT / "clusters/us-east1/apps").rglob("*")
+               if path.is_file() and path.suffix in (".yaml", ".conf")
+               and "REPLACE_WITH_" in path.read_text(encoding="utf-8")]
+    if missing:
+        raise RuntimeError("Complete application image/Bitwarden placeholders first: " + ", ".join(sorted(missing)))
 
 # Only resources belonging to the former Argo CD entry may be replaced/removed.
 # Cluster, nodes, API Gateway, private NLB and target group are never allowlisted.
@@ -87,6 +98,7 @@ class Lab:
         return arn
 
     def preflight(self):
+        validate_manifests()
         print(f"Target: {self.account} / {self.region} / {self.config['cluster_name']}")
         variables = {k: self.config[k] for k in (
             "region", "cluster_name", "kubernetes_version", "availability_zones",
@@ -179,13 +191,14 @@ class Lab:
              "--wait", "--timeout", "20m"])
 
     def bootstrap(self):
+        validate_manifests()
         self.kubeconfig()
         run(["kubectl", "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=15m"])
         run(["helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm", "--force-update"])
         run(["helm", "repo", "add", "bitwarden", "https://charts.bitwarden.com/", "--force-update"])
         run(["helm", "repo", "update"])
         self.argocd(self.outputs())
-        for app in ("api-auth", "api-core"):
+        for app in SECRET_APPS:
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-namespace.yaml"])
         run(["helm", "upgrade", "--install", "sm-operator", "bitwarden/sm-operator", "--namespace",
              "sm-operator-system", "--create-namespace", "--version", "2.0.3", "--wait", "--timeout", "10m"])
@@ -193,7 +206,7 @@ class Lab:
         token = getpass.getpass("Bitwarden machine token (hidden): ")
         if not token:
             raise RuntimeError("Empty token; bootstrap stopped.")
-        for app in ("api-auth", "api-core"):
+        for app in SECRET_APPS:
             secret = {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "bw-auth-token", "namespace": app},
                       "type": "Opaque", "data": {"token": base64.b64encode(token.encode()).decode()}}
             run(["kubectl", "apply", "--server-side", "--field-manager=learner-lab-bootstrap", "-f", "-"],
@@ -208,10 +221,10 @@ class Lab:
 
     def wait_secret(self, app):
         # Query only key names; secret values never enter this process or logs.
-        required = {"DB_URL", "DB_USERNAME", "DB_PASSWORD", "AUTH_JWT_ISSUER"}
-        if app == "api-auth":
-            required |= {"MONGODB_URI", "MONGODB_DATABASE", "AUTH_JWT_PRIVATE_KEY_BASE64",
-                         "AUTH_JWT_PUBLIC_KEY_BASE64", "AUTH_JWT_KEY_ID", "AUTH_RATE_LIMIT_HMAC_KEY"}
+        manifest = (ROOT / f"clusters/us-east1/apps/{app}/bitwarden-secret.yaml").read_text(encoding="utf-8")
+        required = set(re.findall(r"^\s+secretKeyName:\s*(\S+)\s*$", manifest, re.MULTILINE))
+        if not required:
+            raise RuntimeError(f"No mapped Bitwarden keys for {app}")
         for _ in range(120):
             r = run(["kubectl", "get", "secret", app.removeprefix("api-") + "-external", "-n", app,
                      "-o", 'go-template={{range $k,$v := .data}}{{$k}}{{"\\n"}}{{end}}'], capture=True, check=False)
@@ -235,42 +248,62 @@ class Lab:
         if not nodes or any(n["metadata"]["labels"].get("kubernetes.io/arch") != "arm64" or
                             not any(c["type"] == "Ready" and c["status"] == "True" for c in n["status"]["conditions"]) for n in nodes):
             raise RuntimeError("Expected Ready ARM64 nodes.")
-        for app in ("api-auth", "api-core"):
+        for app in SECRET_APPS:
             self.wait_secret(app)
             self.wait_application(app)
             run(["kubectl", "rollout", "status", f"deployment/{app}", "-n", app, "--timeout=10m"])
         run(["kubectl", "get", "pods", "-A"])
         if include_public:
-            self.wait_application("edge")
+            self.wait_application("website")
+            run(["kubectl", "rollout", "status", "deployment/website", "-n", "website", "--timeout=10m"])
             outputs = self.outputs()
             self.verify_public(outputs["api_url"]["value"])
             self.verify_argocd(outputs)
-        print("Cluster and applications ready. Complete real login/database tests in the runbook.")
+        print("All four applications ready. Complete functional tests in the runbook." if include_public
+              else "Internal applications ready; website publication follows.")
 
     def outputs(self):
         self.init()
         return json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "output", "-json"], capture=True).stdout)
 
     def public(self):
-        """Reconcile the GitOps proxy and verify the Terraform-owned gateway."""
+        """Reconcile React and its proxy through the existing Terraform-owned gateway."""
+        validate_manifests()
         self.kubeconfig()
-        run(["kubectl", "apply", "-f", ROOT / "clusters/us-east1/bootstrap/edge-application.yaml"])
-        self.wait_application("edge")
-        run(["kubectl", "rollout", "status", "deployment/edge", "-n", "edge", "--timeout=10m"])
         outputs = self.outputs()
         target = outputs["edge_target_group_arn"]["value"]
+        self.migrate_website()
+        run(["kubectl", "apply", "-f", ROOT / "clusters/us-east1/bootstrap/website-application.yaml"])
+        self.wait_application("website")
+        run(["kubectl", "rollout", "status", "deployment/website", "-n", "website", "--timeout=10m"])
         for _ in range(120):
             targets = self.aws("elbv2", "describe-target-health", "--target-group-arn", target)["TargetHealthDescriptions"]
             if targets and all(t["TargetHealth"]["State"] == "healthy" for t in targets):
                 break
             time.sleep(5)
         else:
-            raise RuntimeError("Private NLB targets did not become healthy. Check NodePort 30080, security groups and edge Pods.")
+            raise RuntimeError("Private NLB targets did not become healthy. Check NodePort 30080, security groups and website Pods.")
         self.verify_public(outputs["api_url"]["value"])
         print(f"API HTTPS: {outputs['api_url']['value']}")
+        print(f"Website HTTPS: {outputs['api_url']['value']}")
         print(f"Core: {outputs['core_url']['value']}")
         print(f"Auth: {outputs['auth_url']['value']}")
         self.verify_argocd(outputs)
+
+    def migrate_website(self):
+        """Release the fixed NodePort; never delete the legacy namespace or secrets."""
+        legacy = run(["kubectl", "get", "service", "edge", "-n", "edge", "--ignore-not-found", "-o", "name"], capture=True)
+        application = run(["kubectl", "get", "application", "edge", "-n", "argocd", "--ignore-not-found", "-o", "name"], capture=True)
+        deployment = run(["kubectl", "get", "deployment", "edge", "-n", "edge", "--ignore-not-found", "-o", "name"], capture=True)
+        if not any(result.stdout.strip() for result in (legacy, application, deployment)):
+            return
+        if not self.args.migrate_website:
+            raise RuntimeError("Legacy edge detected. Re-run with --migrate-website after reviewing the website migration runbook (brief public downtime).")
+        if application.stdout.strip():
+            run(["kubectl", "patch", "application", "edge", "-n", "argocd", "--type=merge", "-p", '{"metadata":{"finalizers":[]}}'])
+            run(["kubectl", "delete", "application", "edge", "-n", "argocd", "--wait=true"])
+        run(["kubectl", "delete", "service", "edge", "-n", "edge", "--ignore-not-found", "--wait=true"])
+        run(["kubectl", "delete", "deployment", "edge", "-n", "edge", "--ignore-not-found", "--wait=true"])
 
     def verify_argocd(self, outputs):
         target = outputs["argocd_target_group_arn"]["value"]
@@ -332,6 +365,11 @@ class Lab:
                     with urllib.request.urlopen(url + path, timeout=10) as response:
                         if response.status != 200:
                             raise RuntimeError(f"Public routing check failed: {path}")
+                for path in ("/", "/index.html", "/home"):
+                    with urllib.request.urlopen(url + path, timeout=10) as response:
+                        html = response.read().lower()
+                        if response.status != 200 or "text/html" not in response.headers.get("Content-Type", "") or b"<html" not in html:
+                            raise RuntimeError(f"React website/SPA routing check failed: {path}")
                 return
             except (urllib.error.URLError, TimeoutError):
                 if attempt == 59:
@@ -352,7 +390,7 @@ class Lab:
         ingresses = json.loads(run(["kubectl", "get", "ingress", "-A", "-o", "json"], capture=True).stdout)["items"]
         if ingresses:
             raise RuntimeError("Remove Ingress resources and verify cloud cleanup before down.")
-        for app in ("edge", "api-core", "api-auth"):
+        for app in ("edge", *reversed(APPS)):
             run(["kubectl", "delete", "application", app, "-n", "argocd", "--ignore-not-found"])
         self.tf("destroy", "-input=false", "-auto-approve", f"-var-file={self.dir / 'variables.json'}")
         print("Infrastructure removed. State bucket retained for recovery/audit; check AWS for residual resources.")
@@ -366,9 +404,12 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update; otherwise only plan")
     parser.add_argument("--migrate-argocd-public", action="store_true", help="For update only: allow replacement/cleanup of the former Argo CD entry, never cluster/API resources")
     parser.add_argument("--confirm-destroy")
+    parser.add_argument("--migrate-website", action="store_true", help="For up/bootstrap/public: replace the old edge with the website on NodePort 30080 (brief downtime)")
     args = parser.parse_args()
     if args.migrate_argocd_public and args.command != "update":
         parser.error("--migrate-argocd-public is only supported with update")
+    if args.migrate_website and args.command not in ("up", "bootstrap", "public"):
+        parser.error("--migrate-website is only supported with up/bootstrap/public")
     lab = Lab(args)
     if args.command == "up":
         if lab.plan(create=True):

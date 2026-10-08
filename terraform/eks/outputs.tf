@@ -10,6 +10,9 @@ output "get_credentials_command" {
 output "api_url" {
   value = aws_apigatewayv2_api.edge.api_endpoint
 }
+output "website_url" {
+  value = aws_apigatewayv2_api.edge.api_endpoint
+}
 output "core_url" {
   value = "${aws_apigatewayv2_api.edge.api_endpoint}/api"
 }
