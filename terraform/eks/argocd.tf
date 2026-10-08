@@ -73,11 +73,13 @@ resource "aws_cloudfront_vpc_origin" "argocd" {
   }
   depends_on = [aws_lb_listener.argocd, aws_vpc_security_group_ingress_rule.argocd_from_cloudfront, aws_internet_gateway.this]
 }
-data "aws_cloudfront_cache_policy" "argocd" {
-  name = "Managed-CachingDisabled"
-}
-data "aws_cloudfront_origin_request_policy" "argocd" {
-  name = "Managed-AllViewerExceptHostHeader"
+locals {
+  # AWS-published managed policy IDs. Learner Lab denies List*Policies, so
+  # reference the policies directly without looking them up or creating any.
+  # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html
+  argocd_cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # CachingDisabled
+  # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html
+  argocd_origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
 }
 resource "aws_cloudfront_distribution" "argocd" {
   enabled             = true
@@ -99,8 +101,8 @@ resource "aws_cloudfront_distribution" "argocd" {
     viewer_protocol_policy   = "https-only"
     allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"]
     cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.argocd.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.argocd.id
+    cache_policy_id          = local.argocd_cache_policy_id
+    origin_request_policy_id = local.argocd_origin_request_policy_id
     compress                 = true
   }
   restrictions {

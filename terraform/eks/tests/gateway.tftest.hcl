@@ -45,11 +45,11 @@ run "argocd_private_origin_contract" {
     error_message = "Only the NLB may reach the Argo CD NodePort."
   }
   assert {
-    condition     = aws_cloudfront_distribution.argocd.default_cache_behavior[0].viewer_protocol_policy == "https-only" && aws_cloudfront_distribution.argocd.default_cache_behavior[0].cache_policy_id == data.aws_cloudfront_cache_policy.argocd.id && data.aws_cloudfront_cache_policy.argocd.name == "Managed-CachingDisabled"
+    condition     = aws_cloudfront_distribution.argocd.default_cache_behavior[0].viewer_protocol_policy == "https-only" && aws_cloudfront_distribution.argocd.default_cache_behavior[0].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
     error_message = "Public access must use HTTPS and disable caching of authenticated responses."
   }
   assert {
-    condition     = one(aws_cloudfront_distribution.argocd.origin).vpc_origin_config[0].vpc_origin_id == aws_cloudfront_vpc_origin.argocd.id && data.aws_cloudfront_origin_request_policy.argocd.name == "Managed-AllViewerExceptHostHeader"
+    condition     = one(aws_cloudfront_distribution.argocd.origin).vpc_origin_config[0].vpc_origin_id == aws_cloudfront_vpc_origin.argocd.id && aws_cloudfront_distribution.argocd.default_cache_behavior[0].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     error_message = "CloudFront must use a private origin and forward cookies, query strings and Authorization."
   }
 }
