@@ -6,7 +6,7 @@ variables {
   cluster_role_arn   = "arn:aws:iam::123456789012:role/LabRole"
   node_role_arn      = "arn:aws:iam::123456789012:role/LabRole"
   admin_role_arn     = "arn:aws:iam::123456789012:role/OperatorRole"
-  admin_cidrs        = ["203.0.113.10/32"]
+  admin_cidrs        = ["0.0.0.0/0"]
   availability_zones = ["us-east-1a", "us-east-1b"]
   addon_versions = {
     vpc_cni    = "v1.19.0-eksbuild.1"

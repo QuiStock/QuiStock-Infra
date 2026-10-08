@@ -28,11 +28,8 @@ variable "admin_role_arn" {
   description = "ARN IAM da role do operador; nunca ARN STS de uma sessão."
 }
 variable "admin_cidrs" {
-  type = list(string)
-  validation {
-    condition     = length(var.admin_cidrs) > 0 && alltrue([for c in var.admin_cidrs : can(cidrnetmask(c)) && !endswith(c, "/0")])
-    error_message = "Informe CIDRs IPv4 administrativos restritos."
-  }
+  type        = list(string)
+  description = "CIDRs do endpoint público EKS. Use 0.0.0.0/0 para acesso de qualquer IPv4; IAM e Access Entries continuam obrigatórios."
 }
 variable "vpc_cidr" {
   type    = string
