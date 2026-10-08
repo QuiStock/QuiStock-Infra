@@ -8,6 +8,8 @@ imagem ARM64 por digest. A imagem deve conter Nginx, iniciar com
 `nginx -g 'daemon off;'`, aceitar `/etc/nginx/nginx.conf` como configuração e
 conter o build Vite em `/usr/share/nginx/html`. A configuração é fornecida por
 ConfigMap com hash; alterações disparam rollout. O Nginx escuta em 8080.
+O runtime sem privilégios da PR quistock-dad #14 é compatível: PID e diretórios
+temporários são configurados em `/tmp`, sem exigir escrita em `/var/run`.
 
 Compile o frontend com `VITE_API_URL=/api`; configure as chamadas de autenticação
 com base `/auth`. Não coloque credenciais em variáveis Vite: são públicas no

@@ -2,9 +2,11 @@
 
 No AWS resources, credentials, or application databases are used.
 """
+import http.client
 import http.server
 import inspect
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -78,7 +80,7 @@ class ProxyIntegration(unittest.TestCase):
                         "-p", "127.0.0.1::8080", "--name", cls.container,
                         "--mount", f"type=bind,source={html},target=/usr/share/nginx/html,readonly",
                         "--mount", f"type=bind,source={path},target=/etc/nginx/nginx.conf,readonly",
-                        "nginx:1.28.0-alpine"], check=True, stdout=subprocess.PIPE)
+                        os.environ.get("NGINX_TEST_IMAGE", "nginx:1.28.0-alpine")], check=True, stdout=subprocess.PIPE)
         port = subprocess.check_output(["docker", "port", cls.container, "8080/tcp"], text=True).strip().rsplit(":", 1)[1]
         cls.url = "http://127.0.0.1:" + port
         for _ in range(60):
@@ -88,7 +90,7 @@ class ProxyIntegration(unittest.TestCase):
                         if response.status != 200:
                             raise RuntimeError("Fixture is not ready")
                 return
-            except (urllib.error.URLError, TimeoutError):
+            except (urllib.error.URLError, TimeoutError, http.client.HTTPException, ConnectionError):
                 time.sleep(1)
         subprocess.run(["docker", "logs", cls.container], check=False)
         raise RuntimeError("Nginx fixture did not start")
