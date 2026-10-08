@@ -70,8 +70,19 @@ Copie `scripts/learner-lab/config.example.json` para
 `.learner-lab/config.json` e preencha os placeholders. O arquivo contém apenas
 parâmetros; nenhum token. Os defaults de capacidade são dois `t4g.medium`, mas
 devem ser confirmados por teste de memória, pods/IPs, vCPU e rolling update.
-As duas zonas devem pertencer à região configurada. O CIDR administrativo é
-o IP público atual do operador com `/32`; nunca `0.0.0.0/0`.
+As duas zonas devem pertencer à região configurada. O exemplo usa
+`"admin_cidrs": ["0.0.0.0/0"]` para evitar atualizações a cada mudança de IP
+do CloudShell. O endpoint EKS aceita conexões de qualquer IPv4, mas exige
+autenticação IAM e autorização pelas Access Entries. Também é possível usar
+CIDRs restritos. O Terraform não impõe validação adicional à lista; a AWS
+valida os valores recebidos.
+
+Para um cluster existente, depois do merge, altere `admin_cidrs` em
+`.learner-lab/config.json` para `["0.0.0.0/0"]`. Esse arquivo é local e ignorado
+pelo Git; atualizar o arquivo de exemplo não modifica a configuração existente.
+Execute `lab.py update` para revisar o plano e `lab.py update --apply` com
+os mesmos argumentos `--config` e `--account` para aplicar uma vez. Se a
+migração do Argo ainda estiver pendente, mantenha `--migrate-argocd-public`.
 
 ## Primeira implantação de teste
 
@@ -103,7 +114,8 @@ o ASG. O NodePort aceita entrada somente do security group desse NLB.
 Não abra os NodePorts para clientes externos. Não há NAT.
 Não cria NAT, roles IAM de aplicação, Karpenter, Auto Mode, autoscaler ou bancos.
 Nós têm saída pública mas não têm regra de entrada aberta ao mundo; o endpoint
-administrativo é restrito. O perfil depende de VPC CNI conseguir usar a role
+administrativo segue `admin_cidrs` e o exemplo permite qualquer IPv4 com IAM.
+O perfil depende de VPC CNI conseguir usar a role
 existente do nó. Roles amplas do laboratório não equivalem a isolamento IAM
 de produção. A opção STANDARD evita aceitar suporte estendido automaticamente.
 
@@ -158,7 +170,7 @@ padrão não inclui o hostname AWS, então a verificação do hostname é omitid
 apenas para essa conexão. As verificações de HTTPS das APIs permanecem normais.
 
 Depois do merge, execute no CloudShell da mesma conta com o clone/configuração
-originais. Se o CloudShell reiniciou, consulte seu IP com
+originais. Somente se você optou por CIDRs restritos e o CloudShell reiniciou, consulte seu IP com
 `curl -4fsS https://checkip.amazonaws.com` e acrescente-o com `/32` a
 `admin_cidrs` em `.learner-lab/config.json`, preservando os CIDRs necessários.
 Essa lista restringe o endpoint Kubernetes para o Helm, não a entrada do Argo.
@@ -266,8 +278,9 @@ quando o navegador as permite; autenticação não torna CORS uma barreira de se
 Clientes mobile nativos não dependem de CORS e devem administrar cookies/tokens
 conforme o contrato de autenticação da API.
 
-O endpoint administrativo EKS continua restrito por `admin_cidrs`: isso não
-restringe os usuários das APIs. IPs de clientes mobile podem variar normalmente.
+O endpoint administrativo EKS segue `admin_cidrs`, independentemente das APIs.
+O exemplo aceita qualquer IPv4 com autenticação IAM; você pode optar por uma
+lista restrita. IPs de clientes mobile podem variar normalmente.
 Mantenha um issuer JWT HTTPS idêntico em Auth/Core; o issuer é um identificador,
 e não deve ser alterado automaticamente junto com a URL pública ao trocar de conta.
 A Core continua consultando JWKS por DNS interno.

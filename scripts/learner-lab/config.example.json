@@ -6,7 +6,7 @@
   "node_role_name": "LabRole",
   "admin_role_name": "voclabs",
   "availability_zones": ["us-east-1a", "us-east-1b"],
-  "admin_cidrs": ["REPLACE_WITH_OPERATOR_PUBLIC_IP/32"],
+  "admin_cidrs": ["0.0.0.0/0"],
   "instance_types": ["t4g.medium"],
   "node_count": 2,
   "addon_versions": {

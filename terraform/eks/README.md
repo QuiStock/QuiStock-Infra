@@ -10,7 +10,8 @@ Infraestrutura nova e estado S3 separado do GKE. NÃ£o cria roles IAM: recebe
 ARNs de roles existentes com trust/permissÃµes compatÃ­veis com EKS e EC2.
 Provider AWS 6.21.x; Terraform 1.11.4+. O cluster e os nodes sÃ£o provisionados
 em sub-redes pÃºblicas com saÃ­da Internet Gateway, sem NAT, para reduzir custos.
-Capacidade fixa; nÃ£o hÃ¡ autoscaler. Endpoint administrativo com CIDRs restritos.
+Capacidade fixa; nÃ£o hÃ¡ autoscaler. Endpoint administrativo configurável por `admin_cidrs`, sem validação extra.
+O exemplo usa `0.0.0.0/0` e mantém autenticação IAM e Access Entries.
 
 Use o [runbook](../../docs/learner-lab-feira.md) e a configuraÃ§Ã£o em
 `scripts/learner-lab/config.example.json`. As versÃµes Kubernetes/add-ons precisam
