@@ -1,11 +1,16 @@
 # Argo CD para EKS ARM64. Chart argo/argo-cd 10.9.6.
-# UI interna: kubectl port-forward svc/argocd-server -n argocd 8443:443.
+# HTTPS termina no CloudFront; origem HTTP privada na porta NodePort 30081.
 global:
   nodeSelector:
     kubernetes.io/arch: arm64
+configs:
+  params:
+    server.insecure: true
 server:
   service:
-    type: ClusterIP
+    type: NodePort
+    nodePortHttp: 30081
+    nodePortHttps: 30082
   resources:
     requests:
       cpu: 100m

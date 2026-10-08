@@ -19,3 +19,9 @@ output "auth_url" {
 output "edge_target_group_arn" {
   value = aws_lb_target_group.edge.arn
 }
+output "argocd_url" {
+  value = "https://${aws_cloudfront_distribution.argocd.domain_name}"
+}
+output "argocd_target_group_arn" {
+  value = aws_lb_target_group.argocd.arn
+}

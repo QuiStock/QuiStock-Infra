@@ -125,15 +125,48 @@ class Lab:
         run(["aws", "eks", "update-kubeconfig", "--name", self.config["cluster_name"],
              "--region", self.region, "--kubeconfig", self.dir / "kubeconfig"])
 
+    def plan(self, *, create=False):
+        self.preflight()
+        self.init(create=create)
+        if not create:
+            state = run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "state", "list"], capture=True)
+            if "aws_eks_cluster.this" not in state.stdout.splitlines():
+                raise RuntimeError("Existing cluster missing from remote state. Check account, region and cluster name; update will not create a new cluster.")
+        self.tf("validate")
+        plan = self.dir / "cluster.tfplan"
+        self.tf("plan", "-input=false", f"-var-file={self.dir / 'variables.json'}", f"-out={plan}")
+        if not self.args.apply:
+            print("Plan only. Re-run with --apply after review.")
+            return False
+        details = json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "show", "-json", plan], capture=True).stdout)
+        if any("delete" in change["change"]["actions"] for change in details.get("resource_changes", [])):
+            raise RuntimeError("Plan includes deletion/replacement. Review manually; this command will not destroy existing resources.")
+        self.tf("apply", "-input=false", plan)
+        return True
+
+    def update(self):
+        """Update existing state and Argo CD without rewriting application secrets."""
+        if self.plan():
+            outputs = self.outputs()
+            self.argocd(outputs)
+            self.verify_argocd(outputs)
+
+    def argocd(self, outputs):
+        self.kubeconfig()
+        run(["helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm", "--force-update"])
+        run(["helm", "repo", "update", "argo"])
+        run(["helm", "upgrade", "--install", "argocd", "argo/argo-cd", "--namespace", "argocd",
+             "--create-namespace", "--version", "10.9.6", "--values", ROOT / "clusters/us-east1/argocd/values.yaml",
+             "--set-string", f"configs.cm.url={outputs['argocd_url']['value']}",
+             "--wait", "--timeout", "20m"])
+
     def bootstrap(self):
         self.kubeconfig()
         run(["kubectl", "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=15m"])
         run(["helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm", "--force-update"])
         run(["helm", "repo", "add", "bitwarden", "https://charts.bitwarden.com/", "--force-update"])
         run(["helm", "repo", "update"])
-        run(["helm", "upgrade", "--install", "argocd", "argo/argo-cd", "--namespace", "argocd",
-             "--create-namespace", "--version", "10.9.6", "--values", ROOT / "clusters/us-east1/argocd/values.yaml",
-             "--wait", "--timeout", "20m"])
+        self.argocd(self.outputs())
         for app in ("api-auth", "api-core"):
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-namespace.yaml"])
         run(["helm", "upgrade", "--install", "sm-operator", "bitwarden/sm-operator", "--namespace",
@@ -191,7 +224,9 @@ class Lab:
         run(["kubectl", "get", "pods", "-A"])
         if include_public:
             self.wait_application("edge")
-            self.verify_public(self.outputs()["api_url"]["value"])
+            outputs = self.outputs()
+            self.verify_public(outputs["api_url"]["value"])
+            self.verify_argocd(outputs)
         print("Cluster and applications ready. Complete real login/database tests in the runbook.")
 
     def outputs(self):
@@ -217,6 +252,35 @@ class Lab:
         print(f"API HTTPS: {outputs['api_url']['value']}")
         print(f"Core: {outputs['core_url']['value']}")
         print(f"Auth: {outputs['auth_url']['value']}")
+        self.verify_argocd(outputs)
+
+    def verify_argocd(self, outputs):
+        target = outputs["argocd_target_group_arn"]["value"]
+        for _ in range(120):
+            targets = self.aws("elbv2", "describe-target-health", "--target-group-arn", target)["TargetHealthDescriptions"]
+            if targets and all(t["TargetHealth"]["State"] == "healthy" for t in targets):
+                break
+            time.sleep(5)
+        else:
+            raise RuntimeError("Argo CD NLB targets did not become healthy. Check NodePort 30081 and the Helm upgrade.")
+        url = outputs["argocd_url"]["value"]
+        for attempt in range(120):
+            try:
+                with urllib.request.urlopen(url + "/healthz", timeout=10) as response:
+                    if response.status != 200:
+                        raise RuntimeError("Argo CD public health check failed.")
+                with urllib.request.urlopen(url + "/api/v1/applications", timeout=10):
+                    raise RuntimeError("Argo CD applications API is accessible without authentication.")
+            except urllib.error.HTTPError as error:
+                if error.code in (401, 403) and error.url == url + "/api/v1/applications":
+                    print(f"Argo CD HTTPS: {url}")
+                    return
+                if attempt == 119:
+                    raise RuntimeError("Argo CD CloudFront endpoint failed HTTP verification.") from error
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == 119:
+                    raise RuntimeError("Argo CD CloudFront endpoint did not become reachable.")
+            time.sleep(5)
 
     def verify_public(self, url):
         # No tokens/passwords are used here. Real login remains an operator test.
@@ -261,27 +325,16 @@ class Lab:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "up", "bootstrap", "verify", "public", "down"))
+    parser.add_argument("command", choices=("preflight", "up", "update", "bootstrap", "verify", "public", "down"))
     parser.add_argument("--config", required=True)
     parser.add_argument("--account", required=True)
-    parser.add_argument("--apply", action="store_true", help="Apply the saved plan and bootstrap; otherwise up only plans")
+    parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update; otherwise only plan")
     parser.add_argument("--confirm-destroy")
     args = parser.parse_args()
     lab = Lab(args)
     if args.command == "up":
-        lab.preflight()
-        lab.init(create=True)
-        lab.tf("validate")
-        plan = lab.dir / "cluster.tfplan"
-        lab.tf("plan", "-input=false", f"-var-file={lab.dir / 'variables.json'}", f"-out={plan}")
-        if args.apply:
-            details = json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "show", "-json", plan], capture=True).stdout)
-            if any("delete" in change["change"]["actions"] for change in details.get("resource_changes", [])):
-                raise RuntimeError("Plan includes deletion/replacement. Review manually; up will not destroy existing resources.")
-            lab.tf("apply", "-input=false", plan)
+        if lab.plan(create=True):
             lab.bootstrap()
-        else:
-            print("Plan only (state bucket created/configured). Re-run with --apply after review.")
     else:
         getattr(lab, args.command)()
 

@@ -90,6 +90,7 @@ class SafetyTests(unittest.TestCase):
         obj.kubeconfig = Mock()
         obj.wait_application = Mock()
         obj.verify_public = Mock()
+        obj.verify_argocd = Mock()
         obj.outputs = Mock(return_value={
             "edge_target_group_arn": {"value": "target-arn"},
             "api_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com"},
@@ -115,6 +116,75 @@ class SafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "did not become healthy"):
                 obj.public()
         obj.verify_public.assert_not_called()
+
+    def test_update_only_reconciles_argocd_after_successful_apply(self):
+        obj = self.instance()
+        obj.plan = Mock(return_value=True)
+        obj.outputs = Mock(return_value={"argocd_url": {"value": "https://fixture.cloudfront.net"}})
+        obj.argocd = Mock()
+        obj.verify_argocd = Mock()
+        obj.bootstrap = Mock()
+        obj.update()
+        obj.argocd.assert_called_once_with(obj.outputs.return_value)
+        obj.verify_argocd.assert_called_once_with(obj.outputs.return_value)
+        obj.bootstrap.assert_not_called()
+
+    def test_update_plan_only_does_not_touch_cluster(self):
+        obj = self.instance()
+        obj.plan = Mock(return_value=False)
+        obj.argocd = Mock()
+        obj.update()
+        obj.argocd.assert_not_called()
+
+    def test_plan_rejects_replacement_before_apply(self):
+        obj = self.instance()
+        obj.args.apply = True
+        obj.preflight = Mock()
+        obj.init = Mock()
+        obj.tf = Mock()
+        details = {"resource_changes": [{"change": {"actions": ["delete", "create"]}}]}
+        with patch.object(lab, "run", side_effect=[Mock(stdout="aws_eks_cluster.this\n"), Mock(stdout=json.dumps(details))]):
+            with self.assertRaisesRegex(RuntimeError, "deletion/replacement"):
+                obj.plan()
+        obj.init.assert_called_once_with(create=False)
+        self.assertFalse(any(c.args[0] == "apply" for c in obj.tf.call_args_list))
+
+    def test_update_refuses_missing_remote_cluster_state(self):
+        obj = self.instance()
+        obj.args.apply = True
+        obj.preflight = Mock()
+        obj.init = Mock()
+        obj.tf = Mock()
+        with patch.object(lab, "run", return_value=Mock(stdout="")):
+            with self.assertRaisesRegex(RuntimeError, "missing from remote state"):
+                obj.plan()
+        obj.tf.assert_not_called()
+
+    def test_argocd_verification_rejects_anonymous_applications_access(self):
+        obj = self.instance()
+        obj.aws = Mock(return_value={"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]})
+        outputs = {"argocd_target_group_arn": {"value": "target"}, "argocd_url": {"value": "https://fixture.cloudfront.net"}}
+        context = Mock()
+        context.__enter__ = Mock(return_value=Mock(status=200))
+        context.__exit__ = Mock(return_value=False)
+        with patch.object(lab.urllib.request, "urlopen", return_value=context):
+            with self.assertRaisesRegex(RuntimeError, "without authentication"):
+                obj.verify_argocd(outputs)
+
+    def test_argocd_verification_requires_health_then_authentication(self):
+        obj = self.instance()
+        obj.aws = Mock(return_value={"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]})
+        url = "https://fixture.cloudfront.net"
+        outputs = {"argocd_target_group_arn": {"value": "target"}, "argocd_url": {"value": url}}
+        context = Mock()
+        context.__enter__ = Mock(return_value=Mock(status=200))
+        context.__exit__ = Mock(return_value=False)
+        denied = lab.urllib.error.HTTPError(url + "/api/v1/applications", 401, "Unauthorized", {}, None)
+        with patch.object(lab.urllib.request, "urlopen", side_effect=[context, denied]) as request:
+            obj.verify_argocd(outputs)
+        denied.close()
+        self.assertEqual(request.call_args_list[0].args[0], url + "/healthz")
+        self.assertEqual(request.call_args_list[1].args[0], url + "/api/v1/applications")
 
     def test_credentialed_cors_cannot_return_literal_wildcard(self):
         obj = self.instance()
