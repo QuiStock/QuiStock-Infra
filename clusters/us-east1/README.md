@@ -4,7 +4,7 @@ O estado desejado continua em `clusters/us-east1`, preservando os paths das pipe
 
 Consulte o [runbook Learner Lab](../../docs/learner-lab-feira.md) para provisionamento, bootstrap, Secrets, entrada HTTPS, recuperação e troca de conta. O script instala Bitwarden e Argo CD e aplica Auth antes de Core.
 
-Argo CD tem uma URL HTTPS CloudFront separada, com origem VPC no NLB privado existente. O Helm configura NodePort 30081 e a URL real do painel; `lab.py update --apply` atualiza clusters existentes sem reescrever os tokens Bitwarden.
+Argo CD tem um NLB público separado em TCP 443, com HTTPS próprio, login obrigatório e certificado autoassinado. O Helm configura HTTPS NodePort 30081 e a URL real do painel. A migração da tentativa CloudFront usa `lab.py update --migrate-argocd-public --apply`, preservando tokens Bitwarden e o cluster.
 
 Ambas as APIs usam `kubernetes.io/arch: arm64`, Services ClusterIP e imagens GHCR por digest. Auth lê `auth-external`; Core lê `core-external`; os dois Secrets são sincronizados pelo operador Bitwarden e exigem `bw-auth-token` no respectivo namespace. Os UUIDs dos manifests não são valores secretos.
 

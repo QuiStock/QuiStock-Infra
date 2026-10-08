@@ -13,7 +13,8 @@ class SafetyTests(unittest.TestCase):
     def instance(self):
         obj = lab.Lab.__new__(lab.Lab)
         obj.account = "123456789012"
-        obj.args = Mock(confirm_destroy=None)
+        obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False)
+        obj.argocd_tls_context = Mock(return_value=Mock())
         obj.config = {"cluster_name": "quistock"}
         obj.region = "us-east-1"
         obj.dir = Path("isolated")
@@ -120,7 +121,7 @@ class SafetyTests(unittest.TestCase):
     def test_update_only_reconciles_argocd_after_successful_apply(self):
         obj = self.instance()
         obj.plan = Mock(return_value=True)
-        obj.outputs = Mock(return_value={"argocd_url": {"value": "https://fixture.cloudfront.net"}})
+        obj.outputs = Mock(return_value={"argocd_url": {"value": "https://fixture.elb.amazonaws.com"}})
         obj.argocd = Mock()
         obj.verify_argocd = Mock()
         obj.bootstrap = Mock()
@@ -142,7 +143,7 @@ class SafetyTests(unittest.TestCase):
         obj.preflight = Mock()
         obj.init = Mock()
         obj.tf = Mock()
-        details = {"resource_changes": [{"change": {"actions": ["delete", "create"]}}]}
+        details = {"resource_changes": [{"address": "aws_eks_cluster.this", "change": {"actions": ["delete", "create"]}}]}
         with patch.object(lab, "run", side_effect=[Mock(stdout="aws_eks_cluster.this\n"), Mock(stdout=json.dumps(details))]):
             with self.assertRaisesRegex(RuntimeError, "deletion/replacement"):
                 obj.plan()
@@ -160,10 +161,38 @@ class SafetyTests(unittest.TestCase):
                 obj.plan()
         obj.tf.assert_not_called()
 
+    def test_migration_permits_only_former_argocd_entry_cleanup(self):
+        details = {"resource_changes": [
+            {"address": "aws_lb_listener.argocd", "change": {"actions": ["delete", "create"]}},
+            {"address": "aws_vpc_security_group_ingress_rule.argocd_from_cloudfront", "change": {"actions": ["delete"]}}]}
+        with self.assertRaisesRegex(RuntimeError, "deletion/replacement"):
+            lab.validate_plan(details)
+        lab.validate_plan(details, migrate_argocd_public=True)
+
+    def test_migration_still_refuses_cluster_api_and_target_group_deletion(self):
+        for address in ("aws_eks_cluster.this", "aws_eks_node_group.arm", "aws_lb.edge",
+                        "aws_apigatewayv2_api.edge", "aws_lb_target_group.argocd"):
+            details = {"resource_changes": [{"address": address, "change": {"actions": ["delete", "create"]}}]}
+            with self.subTest(address=address), self.assertRaisesRegex(RuntimeError, address):
+                lab.validate_plan(details, migrate_argocd_public=True)
+
+    def test_tls_trust_reads_only_public_certificate_and_preserves_verification(self):
+        obj = self.instance()
+        del obj.argocd_tls_context
+        certificate = "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----"
+        results = [Mock(returncode=1, stdout=""), Mock(returncode=0, stdout=lab.base64.b64encode(certificate.encode()).decode())]
+        with patch.object(lab, "run", side_effect=results) as command, patch.object(lab.ssl, "SSLContext") as factory:
+            context = obj.argocd_tls_context()
+        factory.assert_called_once_with(lab.ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations.assert_called_once_with(cadata=certificate)
+        self.assertFalse(context.check_hostname)
+        self.assertNotIn("verify_mode", context.__dict__)
+        self.assertTrue(all(c.args[0][-1] == r"jsonpath={.data.tls\.crt}" for c in command.call_args_list))
+
     def test_argocd_verification_rejects_anonymous_applications_access(self):
         obj = self.instance()
         obj.aws = Mock(return_value={"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]})
-        outputs = {"argocd_target_group_arn": {"value": "target"}, "argocd_url": {"value": "https://fixture.cloudfront.net"}}
+        outputs = {"argocd_target_group_arn": {"value": "target"}, "argocd_url": {"value": "https://fixture.elb.amazonaws.com"}}
         context = Mock()
         context.__enter__ = Mock(return_value=Mock(status=200))
         context.__exit__ = Mock(return_value=False)
@@ -174,7 +203,7 @@ class SafetyTests(unittest.TestCase):
     def test_argocd_verification_requires_health_then_authentication(self):
         obj = self.instance()
         obj.aws = Mock(return_value={"TargetHealthDescriptions": [{"TargetHealth": {"State": "healthy"}}]})
-        url = "https://fixture.cloudfront.net"
+        url = "https://fixture.elb.amazonaws.com"
         outputs = {"argocd_target_group_arn": {"value": "target"}, "argocd_url": {"value": url}}
         context = Mock()
         context.__enter__ = Mock(return_value=Mock(status=200))
@@ -185,6 +214,7 @@ class SafetyTests(unittest.TestCase):
         denied.close()
         self.assertEqual(request.call_args_list[0].args[0], url + "/healthz")
         self.assertEqual(request.call_args_list[1].args[0], url + "/api/v1/applications")
+        self.assertTrue(all(c.kwargs["context"] is obj.argocd_tls_context.return_value for c in request.call_args_list))
 
     def test_credentialed_cors_cannot_return_literal_wildcard(self):
         obj = self.instance()
