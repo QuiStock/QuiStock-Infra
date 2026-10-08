@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-chatbot
-          image: REPLACE_WITH_CHATBOT_ARM64_IMAGE_DIGEST
+          image: ghcr.io/quistock/ai-multi-agent@sha256:d29a83f1546fb40e00045703185cea4462d839e5f6d8f49845456615c142c0e9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
