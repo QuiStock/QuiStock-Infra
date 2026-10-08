@@ -30,7 +30,10 @@ vez e reutilize-o. IDs de conta, credenciais STS, IP administrativo e URL do API
    NLB/listener/target group e anexar target groups ao Auto Scaling Group dos nós.
    Não é necessário criar uma role para um controlador Kubernetes de balanceadores.
    CloudFront também precisa das operações de criar/consultar/atualizar/apagar
-   distributions e VPC origins, consultar policies gerenciadas e criar ENIs.
+   distributions e VPC origins. As policies gerenciadas são referenciadas pelos
+   IDs publicados pela AWS, sem `ListCachePolicies`/`ListOriginRequestPolicies`:
+   essas consultas são negadas no Learner Lab validado. As ENIs são criadas
+   pelo serviço usando a service-linked role.
    Na primeira origem VPC, AWS cria a service-linked role
    `AWSServiceRoleForCloudFrontVPCOrigin` se ela ainda não existir; o operador
    precisa poder autorizar essa criação (`iam:CreateServiceLinkedRole` para
@@ -150,6 +153,13 @@ caminho privado; o NLB não se torna público. A policy `CachingDisabled` impede
 cache de páginas/respostas autenticadas; `AllViewerExceptHostHeader` encaminha
 cookies, Authorization e query strings. `configs.cm.url` recebe a URL real
 no Helm upgrade. Não há CORS aberto para o painel administrativo.
+
+Os IDs gerenciados são `4135ea2d-6df8-44a3-9df3-4b5a84be39ad` (CachingDisabled)
+e `b689b0a8-53d0-40ab-baf2-68738e2966ac` (AllViewerExceptHostHeader).
+Referenciá-los diretamente remove as consultas de listagem negadas no lab;
+não concede novas permissões nem garante autorização para criar a distribuição.
+Um erro nessa etapa do plano não aplica os recursos. Atualize o clone e repita
+`update`/`update --apply` usando o mesmo estado após receber a correção.
 
 VPC origins em us-east-1 não suportam `use1-az3` (ID estável, diferente do nome
 `us-east-1a`, que varia por conta). O plano verifica as zonas antes de aplicar.
