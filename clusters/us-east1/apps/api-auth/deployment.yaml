@@ -29,6 +29,13 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            # Frontend and API URLs are separate: allow secure cross-site cookies.
+            - name: AUTH_COOKIE_SAME_SITE
+              value: "None"
+            - name: AUTH_COOKIE_SECURE
+              value: "true"
+            - name: AUTH_COOKIE_PATH
+              value: "/"
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
