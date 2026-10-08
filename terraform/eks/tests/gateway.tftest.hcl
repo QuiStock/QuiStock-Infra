@@ -1,4 +1,8 @@
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_data "aws_availability_zone" {
+    defaults = { zone_id = "use1-az1" }
+  }
+}
 
 variables {
   account_id         = "123456789012"
@@ -13,6 +17,50 @@ variables {
     coredns    = "v1.11.4-eksbuild.1"
     kube_proxy = "v1.34.0-eksbuild.1"
   }
+}
+
+run "argocd_private_origin_contract" {
+  command = plan
+  override_resource {
+    target          = aws_lb.edge
+    override_during = plan
+    values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/edge/0123456789abcdef" }
+  }
+  override_resource {
+    target          = aws_security_group.nlb
+    override_during = plan
+    values          = { id = "sg-0123456789abcdef0" }
+  }
+  override_resource {
+    target          = aws_cloudfront_vpc_origin.argocd
+    override_during = plan
+    values          = { id = "vo_fixture" }
+  }
+  assert {
+    condition     = aws_lb.edge.internal && aws_lb_listener.argocd.load_balancer_arn == aws_lb.edge.arn && aws_lb_listener.argocd.port == 81 && aws_lb_listener.edge.port == 80
+    error_message = "Argo CD must reuse the private NLB on a separate listener without changing the API listener."
+  }
+  assert {
+    condition     = aws_lb_target_group.argocd.port == 30081 && aws_vpc_security_group_ingress_rule.argocd_nodes_from_nlb.referenced_security_group_id == aws_security_group.nlb.id
+    error_message = "Only the NLB may reach the Argo CD NodePort."
+  }
+  assert {
+    condition     = aws_cloudfront_distribution.argocd.default_cache_behavior[0].viewer_protocol_policy == "https-only" && aws_cloudfront_distribution.argocd.default_cache_behavior[0].cache_policy_id == data.aws_cloudfront_cache_policy.argocd.id && data.aws_cloudfront_cache_policy.argocd.name == "Managed-CachingDisabled"
+    error_message = "Public access must use HTTPS and disable caching of authenticated responses."
+  }
+  assert {
+    condition     = one(aws_cloudfront_distribution.argocd.origin).vpc_origin_config[0].vpc_origin_id == aws_cloudfront_vpc_origin.argocd.id && data.aws_cloudfront_origin_request_policy.argocd.name == "Managed-AllViewerExceptHostHeader"
+    error_message = "CloudFront must use a private origin and forward cookies, query strings and Authorization."
+  }
+}
+
+run "unsupported_origin_zone_is_rejected" {
+  command = plan
+  override_data {
+    target = data.aws_availability_zone.argocd["us-east-1a"]
+    values = { zone_id = "use1-az3" }
+  }
+  expect_failures = [aws_cloudfront_vpc_origin.argocd]
 }
 
 run "private_gateway_contract" {

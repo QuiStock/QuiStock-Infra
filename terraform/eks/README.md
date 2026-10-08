@@ -1,5 +1,12 @@
 # EKS ARM64 no Learner Lab
 
+Argo CD tem URL HTTPS CloudFront com certificado padrão e origem VPC no NLB
+privado existente (listener 81, NodePort 30081), sem outro balanceador ou domínio.
+Exige permissão CloudFront/VPC origins e a service-linked role correspondente.
+Em us-east-1, `use1-az3` não é suportada; o plano rejeita essa zona.
+Para clusters existentes use `lab.py update` e depois `update --apply`;
+esse caminho preserva os tokens Bitwarden e recusa destruição/substituição.
+
 Infraestrutura nova e estado S3 separado do GKE. NÃ£o cria roles IAM: recebe
 ARNs de roles existentes com trust/permissÃµes compatÃ­veis com EKS e EC2.
 Provider AWS 6.21.x; Terraform 1.11.4+. O cluster e os nodes sÃ£o provisionados
