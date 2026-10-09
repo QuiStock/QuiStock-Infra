@@ -134,8 +134,9 @@ class SafetyTests(unittest.TestCase):
 
     def test_chatbot_secret_wait_requires_its_mapped_credentials(self):
         obj = self.instance()
-        keys = "GEMINI_API_KEY GROQ_API_KEY HF_TOKEN JWT_SECRET POSTGRES_DSN MONGODB_URI MONGODB_DB QDRANT_URL QDRANT_API_KEY REDIS_URL".split()
-        with patch.object(lab, "run", side_effect=[Mock(returncode=0, stdout="JWT_SECRET\n"),
+        keys = "OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY HF_TOKEN JWT_SECRET POSTGRES_DSN MONGODB_URI MONGODB_DB QDRANT_URL QDRANT_API_KEY REDIS_URL".split()
+        without_openai = "\n".join(key for key in keys if key != "OPENAI_API_KEY")
+        with patch.object(lab, "run", side_effect=[Mock(returncode=0, stdout=without_openai),
                                                  Mock(returncode=0, stdout="\n".join(keys))]) as command, \
              patch.object(lab.time, "sleep"):
             obj.wait_secret("api-chatbot")
