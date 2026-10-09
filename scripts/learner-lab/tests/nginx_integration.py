@@ -71,6 +71,8 @@ class ProxyIntegration(unittest.TestCase):
         (html / "index.html").write_text('<html><div id="root">React fixture</div></html>', encoding="utf-8")
         (html / "assets").mkdir()
         (html / "assets/app.js").write_text('console.log("fixture");', encoding="utf-8")
+        (html / "assets/app.css").write_text('body { color: black; }', encoding="utf-8")
+        (html / "assets/app.wasm").write_bytes(b'\x00asm\x01\x00\x00\x00')
         subprocess.run(["docker", "network", "create", cls.network], check=True, stdout=subprocess.PIPE)
         subprocess.run(["docker", "run", "-d", "--rm", "--network", cls.network,
                         "--name", cls.fixture, "--mount",
@@ -149,6 +151,14 @@ class ProxyIntegration(unittest.TestCase):
             self.assertIn(b"console.log", response.read())
         with urllib.request.urlopen(self.url + "/index.html", timeout=5) as response:
             self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_static_assets_have_browser_compatible_mime_types(self):
+        for path, mime in (("/assets/app.js", "application/javascript"),
+                           ("/assets/app.css", "text/css"),
+                           ("/assets/app.wasm", "application/wasm")):
+            with self.subTest(path=path), urllib.request.urlopen(self.url + path, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers.get_content_type(), mime)
 
     def test_unknown_assets_return_404(self):
         for path in ("/assets/missing.js",):
