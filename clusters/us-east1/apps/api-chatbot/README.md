@@ -7,7 +7,12 @@ O bootstrap recusa placeholders e instala o token Bitwarden neste namespace.
 Os valores dos secrets não são escritos no Git nem no estado Terraform.
 
 Os nomes de ambiente correspondem ao contrato atual de `AI_Multi-Agent`:
-Gemini/Groq/Hugging Face, JWT, PostgreSQL somente leitura, MongoDB, Qdrant e Redis.
+OpenAI/Gemini/Groq/Hugging Face, JWT, PostgreSQL somente leitura, MongoDB,
+Qdrant e Redis. A imagem v0.2.0 usa OpenAI para resumos/títulos e Gemini para
+embeddings. Preencha `REPLACE_WITH_CHATBOT_OPENAI_API_KEY_SECRET_ID` com o ID
+do secret `OPENAI_API_KEY` no Bitwarden antes de integrar/aplicar: o bootstrap
+recusa o placeholder e aguarda essa chave na sincronização do Secret. Nunca
+coloque o valor da chave no manifest. O machine account precisa acessar esse ID.
 MongoDB, Qdrant e PostgreSQL permanecem externos ao ciclo de recriação do
 cluster. `redis-temp.yaml` fornece o Redis temporário já usado no laboratório;
 ele não tem persistência. API e worker devem usar o mesmo `REDIS_URL`.
@@ -16,9 +21,9 @@ O Deployment `api-chatbot` executa dois containers com a mesma imagem ARM64:
 `api-chatbot` inicia Uvicorn, e `summary-worker` inicia
 `python -m src.memory.worker.run_summary_worker`. O segundo consome Redis
 Streams, publica a outbox MongoDB, reconcilia jobs e gera/indexa os resumos no
-Qdrant. Os dois recebem o mesmo Secret `chatbot-external`; não há novos IDs
-Bitwarden, Service ou porta HTTP para o worker. As publicações do chatbot devem
-atualizar os dois digests juntos.
+Qdrant. Os dois recebem o mesmo Secret `chatbot-external`, incluindo a chave
+OpenAI ausente no mapeamento anterior. O worker não precisa de Service ou porta
+HTTP. As publicações do chatbot devem atualizar os dois digests juntos.
 
 O worker acrescenta request de 100m CPU/512Mi memória e limite de 1 CPU/1Gi.
 Compartilha a réplica e o ciclo de vida do Pod com a API. Durante RollingUpdate
