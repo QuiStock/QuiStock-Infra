@@ -1,4 +1,4 @@
-# Chatbot interno — estrutura para preenchimento
+# Chatbot interno e worker de resumos
 
 Preencha a imagem ARM64 por digest em `deployment.yaml` e os IDs em
 `bitwarden-secret.yaml` antes de provisionar. A imagem deve iniciar a API
@@ -8,9 +8,34 @@ Os valores dos secrets não são escritos no Git nem no estado Terraform.
 
 Os nomes de ambiente correspondem ao contrato atual de `AI_Multi-Agent`:
 Gemini/Groq/Hugging Face, JWT, PostgreSQL somente leitura, MongoDB, Qdrant e Redis.
-Esses serviços de dados permanecem externos ao ciclo de recriação do cluster.
-Não criamos Deployments de bancos, Redis ou workers. Funcionalidades que exigem
-um worker de resumos continuam dependentes de um processo externo.
+MongoDB, Qdrant e PostgreSQL permanecem externos ao ciclo de recriação do
+cluster. `redis-temp.yaml` fornece o Redis temporário já usado no laboratório;
+ele não tem persistência. API e worker devem usar o mesmo `REDIS_URL`.
+
+O Deployment `api-chatbot` executa dois containers com a mesma imagem ARM64:
+`api-chatbot` inicia Uvicorn, e `summary-worker` inicia
+`python -m src.memory.worker.run_summary_worker`. O segundo consome Redis
+Streams, publica a outbox MongoDB, reconcilia jobs e gera/indexa os resumos no
+Qdrant. Os dois recebem o mesmo Secret `chatbot-external`; não há novos IDs
+Bitwarden, Service ou porta HTTP para o worker. As publicações do chatbot devem
+atualizar os dois digests juntos.
+
+O worker acrescenta request de 100m CPU/512Mi memória e limite de 1 CPU/1Gi.
+Compartilha a réplica e o ciclo de vida do Pod com a API. Durante RollingUpdate
+podem existir dois workers: IDs únicos de consumidor e leases do serviço
+coordenam os jobs; não se presume execução exatamente uma vez. SIGTERM é
+entregue diretamente ao Python; jobs interrompidos são retomados pelos leases.
+
+O worker não fornece health endpoint, portanto não recebe probes HTTP/TCP da
+API. Um processo Running não prova que os jobs estão sendo concluídos. Confira
+os logs e teste o encerramento de uma conversa autenticada, verificando que o
+job termina e o resumo fica disponível:
+
+```bash
+kubectl rollout status deployment/api-chatbot -n api-chatbot --timeout=10m
+kubectl logs -n api-chatbot deployment/api-chatbot -c summary-worker --tail=100 -f
+kubectl logs -n api-chatbot deployment/api-chatbot -c api-chatbot --tail=100 -f
+```
 
 `/health` verifica dependências externas e serve apenas para readiness.
 Startup/liveness usam TCP para não reiniciar a API quando um provedor estiver
