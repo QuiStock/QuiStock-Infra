@@ -134,14 +134,19 @@ class SafetyTests(unittest.TestCase):
 
     def test_chatbot_secret_wait_requires_its_mapped_credentials(self):
         obj = self.instance()
-        keys = "OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY HF_TOKEN JWT_SECRET POSTGRES_DSN MONGODB_URI MONGODB_DB QDRANT_URL QDRANT_API_KEY REDIS_URL".split()
-        without_openai = "\n".join(key for key in keys if key != "OPENAI_API_KEY")
-        with patch.object(lab, "run", side_effect=[Mock(returncode=0, stdout=without_openai),
-                                                 Mock(returncode=0, stdout="\n".join(keys))]) as command, \
-             patch.object(lab.time, "sleep"):
-            obj.wait_secret("api-chatbot")
-        self.assertEqual(command.call_count, 2)
-        self.assertIn("chatbot-external", command.call_args.args[0])
+        manifest = (lab.ROOT / "clusters/us-east1/apps/api-chatbot/bitwarden-secret.yaml").read_text(encoding="utf-8")
+        keys = {line.split(":", 1)[1].strip() for line in manifest.splitlines()
+                if line.strip().startswith("secretKeyName:")}
+        self.assertTrue(keys, "The chatbot must declare mapped Bitwarden keys")
+        for missing in sorted(keys):
+            with self.subTest(missing=missing), \
+                 patch.object(lab, "run", side_effect=[Mock(returncode=0, stdout="\n".join(keys - {missing})),
+                                                      Mock(returncode=0, stdout="\n".join(keys))]) as command, \
+                 patch.object(lab.time, "sleep") as sleep:
+                obj.wait_secret("api-chatbot")
+                self.assertEqual(command.call_count, 2)
+                sleep.assert_called_once_with(5)
+                self.assertIn("chatbot-external", command.call_args.args[0])
 
     def test_website_migration_requires_explicit_flag_before_mutation(self):
         obj = self.instance()
