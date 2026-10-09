@@ -58,3 +58,22 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+        - name: summary-worker
+          image: ghcr.io/quistock/ai-multi-agent@sha256:df23d2f1bbf21923f0050ad0012d684f3e2339d5bf5e2123675d392690e73690
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "src.memory.worker.run_summary_worker"]
+          env:
+            - name: AUTH_BYPASS_LOCAL_TESTS
+              value: "false"
+            - name: APP_ENVIRONMENT
+              value: "production"
+          envFrom:
+            - secretRef:
+                name: chatbot-external
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
