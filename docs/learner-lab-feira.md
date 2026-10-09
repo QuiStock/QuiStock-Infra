@@ -108,6 +108,56 @@ via Kubernetes, sem ler senha/chave privada nem desligar TLS das APIs.
 
 ## Migração do proxy edge para website
 
+### Recuperar nós que falham com a LabRole
+
+Se o console EC2 mostrar `nodeadm` falhando em `ec2:DescribeInstances` por
+negação explícita de uma SCP, repetir Helm ou recriar o cluster não resolve.
+Use a role de nós fornecida pelo laboratório (`...LabEksNodeRole...`), a mesma
+selecionada na interface EKS, em `node_role_name` da configuração local. Mantenha
+`cluster_role_name`, `admin_role_name`, versão, subnets, quantidade e tipos de
+instância. O nome da role não prova que a SCP permita a chamada: confirme o
+bootstrap das novas instâncias. O script não altera IAM, SCPs ou Access Entries
+dos nós; o EKS gerencia a entrada `EC2_LINUX` da nova role.
+
+A troca de role exige substituir o nodegroup, não o cluster. Pare outros
+processos de Terraform/Helm e revise o plano:
+
+```bash
+python scripts/learner-lab/lab.py update --config .learner-lab/config.json --account ACCOUNT_ID --migrate-node-role
+python scripts/learner-lab/lab.py update --config .learner-lab/config.json --account ACCOUNT_ID --migrate-node-role --apply
+```
+
+A flag só permite substituir `aws_eks_node_group.arm` quando a única causa de
+substituição é `node_role_arn`, mantendo capacidade ARM64 e rede. Permite também
+recriar os dois anexos ASG aos target groups existentes dos NLBs. Cluster, NLBs,
+target groups, API Gateway, Secrets e role administrativa são preservados.
+Há indisponibilidade durante a troca; não execute `down`, `state rm` ou crie um
+nodegroup paralelo pela interface. Se o apply for interrompido, repita o mesmo
+comando/configuração/estado; a flag aceita reconectar os anexos quando o plano
+retoma a criação do nodegroup.
+
+Antes de instalar/atualizar Argo CD, o script espera até 15 minutos pela
+quantidade configurada de nós ARM64 Ready e sem cordon, mostrando progresso a
+cada minuto. Se não registrarem, examine os novos logs EC2: não tente superar
+uma SCP com permissões IAM adicionais. Uma nova negação exige reavaliar a
+configuração suportada do laboratório.
+
+Se houver uma revisão Helm `pending-*` de uma execução anterior, o script
+interrompe antes de outro upgrade (a migração AWS já foi aplicada). Depois de
+os nós ficarem Ready e de confirmar que nenhum Helm está ativo, consulte
+`helm history argocd -n argocd` e recupere a última revisão bem-sucedida:
+
+```bash
+helm rollback argocd REVISAO_BEM_SUCEDIDA -n argocd --wait --timeout 10m
+python scripts/learner-lab/lab.py update --config .learner-lab/config.json --account ACCOUNT_ID --apply
+```
+
+Não apague Secrets de release do Helm. O segundo update reaplica os valores
+atuais do Argo CD após o rollback. Só prossiga ao bootstrap das aplicações
+depois de recuperar nós e Argo CD.
+
+### Trocar o proxy público
+
 Só execute após publicar imagens, preencher IDs e mesclar os manifests em
 main: as Applications acompanham main, não a branch local. Primeiro revise
 as alterações Terraform (adicionam a rota $default e website_url; preservam

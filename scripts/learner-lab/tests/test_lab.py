@@ -14,7 +14,7 @@ class SafetyTests(unittest.TestCase):
     def instance(self):
         obj = lab.Lab.__new__(lab.Lab)
         obj.account = "123456789012"
-        obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False, migrate_website=False)
+        obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False, migrate_website=False, migrate_node_role=False)
         obj.argocd_tls_context = Mock(return_value=Mock())
         obj.config = {"cluster_name": "quistock"}
         obj.region = "us-east-1"
@@ -259,6 +259,113 @@ class SafetyTests(unittest.TestCase):
             details = {"resource_changes": [{"address": address, "change": {"actions": ["delete", "create"]}}]}
             with self.subTest(address=address), self.assertRaisesRegex(RuntimeError, address):
                 lab.validate_plan(details, migrate_argocd_public=True)
+
+    def node_migration_plan(self):
+        before = {"node_role_arn": "arn:aws:iam::123456789012:role/LabRole",
+                  "cluster_name": "quistock", "node_group_name": "quistock-arm",
+                  "ami_type": "AL2023_ARM_64_STANDARD", "capacity_type": "ON_DEMAND",
+                  "instance_types": ["t4g.medium"], "subnet_ids": ["subnet-a", "subnet-b"],
+                  "scaling_config": [{"desired_size": 2, "min_size": 2, "max_size": 2}], "disk_size": 20}
+        after = dict(before, node_role_arn="arn:aws:iam::123456789012:role/LabEksNodeRole")
+        changes = [{"address": "aws_eks_node_group.arm", "change": {
+            "actions": ["delete", "create"], "before": before, "after": after,
+            "replace_paths": [["node_role_arn"]]}}]
+        for name in ("edge", "argocd"):
+            changes.append({"address": f"aws_autoscaling_attachment.{name}", "change": {
+                "actions": ["delete", "create"], "replace_paths": [["autoscaling_group_name"]],
+                "before": {"autoscaling_group_name": "old", "lb_target_group_arn": name},
+                "after": {"autoscaling_group_name": None, "lb_target_group_arn": name}}})
+        return {"resource_changes": changes}
+
+    def test_node_role_replacement_requires_explicit_migration_flag(self):
+        details = self.node_migration_plan()
+        with self.assertRaisesRegex(RuntimeError, "deletion/replacement"):
+            lab.validate_plan(details)
+        lab.validate_plan(details, migrate_node_role=True)
+
+    def test_plan_passes_node_migration_flag_before_applying_saved_plan(self):
+        obj = self.instance()
+        obj.args.apply = True
+        obj.args.migrate_node_role = True
+        obj.preflight = Mock()
+        obj.init = Mock()
+        obj.tf = Mock()
+        details = self.node_migration_plan()
+        with patch.object(lab, "run", side_effect=[Mock(stdout="aws_eks_cluster.this\n"),
+                                                 Mock(stdout=json.dumps(details))]):
+            self.assertTrue(obj.plan())
+        self.assertEqual(obj.tf.call_args.args[0], "apply")
+
+    def test_node_migration_refuses_capacity_network_and_image_changes(self):
+        for key, value in (("ami_type", "AL2023_X86_64_STANDARD"), ("cluster_name", "other"),
+                           ("node_group_name", "other"), ("subnet_ids", ["subnet-c"]),
+                           ("instance_types", ["t4g.large"]), ("scaling_config", []), ("disk_size", 40)):
+            details = self.node_migration_plan()
+            details["resource_changes"][0]["change"]["after"][key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "only a role replacement"):
+                lab.validate_plan(details, migrate_node_role=True)
+
+    def test_node_migration_refuses_additional_replacement_causes_or_pure_deletion(self):
+        for actions, paths in ((["delete"], [["node_role_arn"]]),
+                               (["delete", "create"], [["node_role_arn"], ["version"]])):
+            details = self.node_migration_plan()
+            details["resource_changes"][0]["change"].update(actions=actions, replace_paths=paths)
+            with self.assertRaisesRegex(RuntimeError, "only a role replacement"):
+                lab.validate_plan(details, migrate_node_role=True)
+
+    def test_node_migration_preserves_target_groups_and_unrelated_resources(self):
+        details = self.node_migration_plan()
+        details["resource_changes"][1]["change"]["after"]["lb_target_group_arn"] = "different"
+        with self.assertRaisesRegex(RuntimeError, "preserve both NLB"):
+            lab.validate_plan(details, migrate_node_role=True)
+        for address in ("aws_eks_cluster.this", "aws_lb.edge", "aws_lb.argocd",
+                        "aws_lb_target_group.edge", "aws_apigatewayv2_api.edge", "aws_eks_access_entry.admin"):
+            details = self.node_migration_plan()
+            details["resource_changes"].append({"address": address, "change": {"actions": ["delete", "create"]}})
+            with self.subTest(address=address), self.assertRaisesRegex(RuntimeError, address):
+                lab.validate_plan(details, migrate_node_role=True, migrate_argocd_public=True)
+
+    def test_node_migration_can_resume_attachment_replacement_after_interruption(self):
+        details = self.node_migration_plan()
+        details["resource_changes"][0]["change"].update(actions=["create"], before=None, replace_paths=[])
+        lab.validate_plan(details, migrate_node_role=True)
+        details["resource_changes"].pop(0)
+        with self.assertRaisesRegex(RuntimeError, "deletion/replacement"):
+            lab.validate_plan(details, migrate_node_role=True)
+
+    def test_wait_nodes_requires_registered_schedulable_ready_arm64_capacity(self):
+        obj = self.instance()
+        obj.config["node_count"] = 2
+        ready = {"metadata": {"labels": {"kubernetes.io/arch": "arm64"}},
+                 "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+        cordoned = dict(ready, spec={"unschedulable": True})
+        amd64 = dict(ready, metadata={"labels": {"kubernetes.io/arch": "amd64"}})
+        responses = [[], [amd64, cordoned], [ready], [ready, ready]]
+        with patch.object(lab, "run", side_effect=[Mock(stdout=json.dumps({"items": n})) for n in responses]) as command, \
+             patch.object(lab.time, "sleep") as sleep:
+            obj.wait_nodes()
+        self.assertEqual(command.call_count, 4)
+        self.assertEqual(sleep.call_count, 3)
+
+    def test_argocd_does_not_start_helm_when_nodes_never_register(self):
+        obj = self.instance()
+        obj.config["node_count"] = 2
+        obj.kubeconfig = Mock()
+        with patch.object(lab, "run", return_value=Mock(stdout='{"items": []}')) as command, \
+             patch.object(lab.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "ARM64 nodes did not become Ready"):
+                obj.argocd({})
+        self.assertTrue(all(c.args[0][0] == "kubectl" for c in command.call_args_list))
+
+    def test_argocd_refuses_pending_helm_without_automatic_rollback(self):
+        obj = self.instance()
+        obj.kubeconfig = Mock()
+        obj.wait_nodes = Mock()
+        with patch.object(lab, "run", return_value=Mock(returncode=0, stdout='{"info":{"status":"pending-upgrade"}}')) as command:
+            with self.assertRaisesRegex(RuntimeError, "pending Helm operation"):
+                obj.argocd({})
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][0:2], ["helm", "status"])
 
     def test_tls_trust_reads_only_public_certificate_and_preserves_verification(self):
         obj = self.instance()

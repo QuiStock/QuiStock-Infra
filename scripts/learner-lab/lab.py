@@ -42,9 +42,38 @@ ARGOCD_ENTRY_MIGRATION = frozenset({
 })
 
 
-def validate_plan(details, *, migrate_argocd_public=False):
+def validate_plan(details, *, migrate_argocd_public=False, migrate_node_role=False):
     deletions = {c["address"] for c in details.get("resource_changes", []) if "delete" in c["change"]["actions"]}
-    allowed = ARGOCD_ENTRY_MIGRATION if migrate_argocd_public else frozenset()
+    allowed = set(ARGOCD_ENTRY_MIGRATION if migrate_argocd_public else ())
+    if migrate_node_role:
+        changes = {c["address"]: c["change"] for c in details.get("resource_changes", [])}
+        node = changes.get("aws_eks_node_group.arm", {})
+        if "delete" in node.get("actions", []):
+            before, after = node.get("before") or {}, node.get("after") or {}
+            stable = ("cluster_name", "node_group_name", "ami_type", "capacity_type",
+                      "instance_types", "subnet_ids", "scaling_config", "disk_size")
+            if (set(node["actions"]) != {"delete", "create"}
+                    or node.get("replace_paths") != [["node_role_arn"]]
+                    or not before.get("node_role_arn") or not after.get("node_role_arn")
+                    or before["node_role_arn"] == after["node_role_arn"]
+                    or after.get("ami_type") != "AL2023_ARM_64_STANDARD"
+                    or any(before.get(key) != after.get(key) for key in stable)):
+                raise RuntimeError("Node migration permits only a role replacement with unchanged ARM64 capacity, cluster and subnets.")
+            allowed.add("aws_eks_node_group.arm")
+        # Reconnect only the existing target groups to the replacement ASG.
+        # A create-only node also permits resuming after an interrupted replacement.
+        if "aws_eks_node_group.arm" in allowed or node.get("actions") == ["create"]:
+            for address in ("aws_autoscaling_attachment.edge", "aws_autoscaling_attachment.argocd"):
+                attachment = changes.get(address, {})
+                if "delete" not in attachment.get("actions", []):
+                    continue
+                before, after = attachment.get("before") or {}, attachment.get("after") or {}
+                if (set(attachment["actions"]) != {"delete", "create"}
+                        or attachment.get("replace_paths") != [["autoscaling_group_name"]]
+                        or not before.get("lb_target_group_arn")
+                        or before["lb_target_group_arn"] != after.get("lb_target_group_arn")):
+                    raise RuntimeError("Node migration must preserve both NLB target groups.")
+                allowed.add(address)
     if deletions - allowed:
         raise RuntimeError("Plan includes deletion/replacement outside the authorized Argo CD entry migration: " + ", ".join(sorted(deletions - allowed)))
 
@@ -170,7 +199,8 @@ class Lab:
             print("Plan only. Re-run with --apply after review.")
             return False
         details = json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "show", "-json", plan], capture=True).stdout)
-        validate_plan(details, migrate_argocd_public=self.args.migrate_argocd_public)
+        validate_plan(details, migrate_argocd_public=self.args.migrate_argocd_public,
+                      migrate_node_role=self.args.migrate_node_role)
         self.tf("apply", "-input=false", plan)
         return True
 
@@ -183,12 +213,35 @@ class Lab:
 
     def argocd(self, outputs):
         self.kubeconfig()
+        self.wait_nodes()
+        status = run(["helm", "status", "argocd", "-n", "argocd", "-o", "json"], capture=True, check=False)
+        if status.returncode == 0 and json.loads(status.stdout)["info"]["status"].startswith("pending-"):
+            raise RuntimeError("Argo CD has a pending Helm operation. Check running Helm processes/history and recover that revision before retrying update; the node migration has already been applied.")
         run(["helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm", "--force-update"])
         run(["helm", "repo", "update", "argo"])
+        print("Updating Argo CD; Helm may wait up to 20 minutes for Pods/hooks.", flush=True)
         run(["helm", "upgrade", "--install", "argocd", "argo/argo-cd", "--namespace", "argocd",
              "--create-namespace", "--version", "10.9.6", "--values", ROOT / "clusters/us-east1/argocd/values.yaml",
              "--set-string", f"configs.cm.url={outputs['argocd_url']['value']}",
              "--wait", "--timeout", "20m"])
+
+    def wait_nodes(self):
+        """Wait for registered ARM64 capacity before invoking Helm hooks."""
+        expected = self.config["node_count"]
+        previous = None
+        for attempt in range(180):
+            nodes = json.loads(run(["kubectl", "get", "nodes", "-o", "json"], capture=True).stdout)["items"]
+            ready = [n for n in nodes if n["metadata"].get("labels", {}).get("kubernetes.io/arch") == "arm64"
+                     and not n.get("spec", {}).get("unschedulable", False)
+                     and any(c["type"] == "Ready" and c["status"] == "True" for c in n.get("status", {}).get("conditions", []))]
+            progress = (len(nodes), len(ready))
+            if progress != previous or attempt % 12 == 0:
+                print(f"Nodes registered: {len(nodes)}; schedulable Ready ARM64: {len(ready)}/{expected} (timeout 15m).", flush=True)
+                previous = progress
+            if len(ready) >= expected:
+                return
+            time.sleep(5)
+        raise RuntimeError("ARM64 nodes did not become Ready. Check EKS nodegroup health, Auto Scaling activities and EC2 nodeadm console logs before retrying Helm.")
 
     def bootstrap(self):
         validate_manifests()
@@ -405,11 +458,14 @@ def main():
     parser.add_argument("--migrate-argocd-public", action="store_true", help="For update only: allow replacement/cleanup of the former Argo CD entry, never cluster/API resources")
     parser.add_argument("--confirm-destroy")
     parser.add_argument("--migrate-website", action="store_true", help="For up/bootstrap/public: replace the old edge with the website on NodePort 30080 (brief downtime)")
+    parser.add_argument("--migrate-node-role", action="store_true", help="For update only: replace the ARM64 nodegroup to change its IAM role and reconnect the existing NLB target groups (downtime)")
     args = parser.parse_args()
     if args.migrate_argocd_public and args.command != "update":
         parser.error("--migrate-argocd-public is only supported with update")
     if args.migrate_website and args.command not in ("up", "bootstrap", "public"):
         parser.error("--migrate-website is only supported with up/bootstrap/public")
+    if args.migrate_node_role and args.command != "update":
+        parser.error("--migrate-node-role is only supported with update")
     lab = Lab(args)
     if args.command == "up":
         if lab.plan(create=True):

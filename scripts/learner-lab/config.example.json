@@ -3,7 +3,7 @@
   "cluster_name": "quistock",
   "kubernetes_version": "REPLACE_WITH_STANDARD_SUPPORT_VERSION",
   "cluster_role_name": "LabRole",
-  "node_role_name": "LabRole",
+  "node_role_name": "REPLACE_WITH_LAB_EKS_NODE_ROLE_NAME",
   "admin_role_name": "voclabs",
   "availability_zones": ["us-east-1a", "us-east-1b"],
   "admin_cidrs": ["0.0.0.0/0"],
