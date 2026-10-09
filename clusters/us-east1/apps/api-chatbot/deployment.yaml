@@ -31,6 +31,8 @@ spec:
           env:
             - name: AUTH_BYPASS_LOCAL_TESTS
               value: "false"
+            - name: APP_ENVIRONMENT
+              value: "production"
           envFrom:
             - secretRef:
                 name: chatbot-external
