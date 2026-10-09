@@ -1,0 +1,32 @@
+name: Validate and auto-merge image updates
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-update-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  image-update:
+    name: Validate image update
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Only execute code from the trusted base branch, never from the PR.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate changes and enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+        run: python3 .github/scripts/image_update_automerge.py
