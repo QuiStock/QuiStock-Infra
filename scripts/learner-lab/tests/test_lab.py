@@ -16,7 +16,7 @@ class SafetyTests(unittest.TestCase):
         obj.account = "123456789012"
         obj.args = Mock(confirm_destroy=None, migrate_argocd_public=False, migrate_website=False, migrate_node_role=False)
         obj.argocd_tls_context = Mock(return_value=Mock())
-        obj.config = {"cluster_name": "quistock"}
+        obj.config = {"cluster_name": "quistock", "cors_allowed_origins": []}
         obj.region = "us-east-1"
         obj.dir = Path("isolated")
         return obj
@@ -78,6 +78,53 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(command.call_count, 2)
         self.assertIn("go-template", command.call_args.args[0][-1])
 
+    def test_runtime_origins_include_current_gateway_and_only_configured_clients(self):
+        obj = self.instance()
+        obj.config["cors_allowed_origins"] = ["https://website.example", "https://website.example"]
+        with patch.object(lab, "run") as command:
+            obj.runtime_config({"api_url": {"value": "https://new-account.example"}})
+        manifests = [json.loads(c.kwargs["stdin"]) for c in command.call_args_list]
+        self.assertEqual([m["metadata"]["namespace"] for m in manifests], ["api-auth", "api-core"])
+        self.assertTrue(all(m["data"]["CORS_ALLOWED_ORIGINS"] ==
+                            "https://new-account.example,https://website.example" for m in manifests))
+
+    def test_wildcards_paths_and_credentials_are_not_valid_origins(self):
+        for origin in ("*", "https://*", "https://website.example/", "https://user:pass@example.com", "https://a.example,b.example"):
+            with self.subTest(origin=origin), self.assertRaises(RuntimeError):
+                lab.allowed_origins({"cors_allowed_origins": [origin]})
+
+    def test_application_tracks_explicit_infra_branch(self):
+        obj = self.instance()
+        obj.config["infra_ref"] = "codex/learner-lab-runtime-update"
+        with patch.object(lab, "run") as command:
+            obj.apply_application("api-auth")
+        self.assertIn('targetRevision: "codex/learner-lab-runtime-update"', command.call_args.kwargs["stdin"])
+
+    def test_memory_defaults_to_check_and_never_retries_apply(self):
+        obj = self.instance()
+        obj.args.vector_size = 3072
+        obj.args.apply = False
+        obj.kubeconfig = Mock()
+        worker = {"name": "summary-worker", "image": "ghcr.io/quistock/ai-multi-agent-worker@sha256:fixture",
+                  "envFrom": [{"secretRef": {"name": "chatbot-external"}}]}
+        deployment = {"spec": {"template": {"spec": {"containers": [worker], "nodeSelector": {"kubernetes.io/arch": "arm64"}}}}}
+        with patch.object(lab, "run", side_effect=[Mock(stdout=json.dumps(deployment)), Mock(), Mock()]) as command:
+            obj.memory()
+        job = json.loads(command.call_args_list[1].kwargs["stdin"])
+        self.assertEqual(job["spec"]["backoffLimit"], 0)
+        container = job["spec"]["template"]["spec"]["containers"][0]
+        self.assertIn("--check", container["command"])
+        self.assertNotIn("--apply", container["command"])
+        self.assertEqual(container["envFrom"], worker["envFrom"])
+
+    def test_memory_requires_dimension_before_touching_cluster(self):
+        obj = self.instance()
+        obj.args.vector_size = None
+        obj.kubeconfig = Mock()
+        with self.assertRaisesRegex(RuntimeError, "vector-size"):
+            obj.memory()
+        obj.kubeconfig.assert_not_called()
+
     def test_application_requires_both_sync_and_health(self):
         obj = self.instance()
         states = [{"sync": {"status": "Synced"}, "health": {"status": "Progressing"}},
@@ -94,6 +141,7 @@ class SafetyTests(unittest.TestCase):
         obj.verify_public = Mock()
         obj.verify_argocd = Mock()
         obj.migrate_website = Mock()
+        obj.runtime_config = Mock()
         obj.outputs = Mock(return_value={
             "edge_target_group_arn": {"value": "target-arn"},
             "api_url": {"value": "https://fixture.execute-api.us-east-1.amazonaws.com"},
@@ -110,7 +158,7 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(obj.aws.call_count, 2)
         obj.wait_application.assert_called_once_with("website")
         obj.verify_public.assert_called_once_with("https://fixture.execute-api.us-east-1.amazonaws.com")
-        self.assertTrue(any("website-application.yaml" in str(c.args[0]) for c in command.call_args_list))
+        self.assertTrue(any("name: website" in c.kwargs.get("stdin", "") for c in command.call_args_list))
 
     def test_public_refuses_to_report_ready_without_nlb_targets(self):
         obj = self.publication()
@@ -194,7 +242,8 @@ class SafetyTests(unittest.TestCase):
         obj = self.instance()
         obj.kubeconfig = Mock()
         obj.argocd = Mock()
-        obj.outputs = Mock(return_value={})
+        obj.outputs = Mock(return_value={"api_url": {"value": "https://fixture.example"}})
+        obj.runtime_config = Mock()
         obj.wait_secret = Mock()
         obj.wait_application = Mock()
         obj.verify = Mock()
@@ -202,7 +251,7 @@ class SafetyTests(unittest.TestCase):
         with patch.object(lab, "validate_manifests"), patch.object(lab.getpass, "getpass", return_value="fixture"), \
              patch.object(lab, "run") as command:
             obj.bootstrap()
-        secrets = [json.loads(c.kwargs["stdin"]) for c in command.call_args_list if "stdin" in c.kwargs]
+        secrets = [json.loads(c.kwargs["stdin"]) for c in command.call_args_list if c.args[0][1:2] == ["apply"] and c.kwargs.get("stdin", "").startswith('{"apiVersion": "v1", "kind": "Secret"')]
         self.assertEqual([s["metadata"]["namespace"] for s in secrets], list(lab.SECRET_APPS))
         self.assertEqual([c.args[0] for c in obj.wait_secret.call_args_list], list(lab.SECRET_APPS))
         self.assertEqual([c.args[0] for c in obj.wait_application.call_args_list], list(lab.SECRET_APPS))
@@ -415,6 +464,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_credentialed_cors_cannot_return_literal_wildcard(self):
         obj = self.instance()
+        obj.config["cors_allowed_origins"] = ["https://allowed.example"]
         response = Mock(status=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"})
         context = Mock()
         context.__enter__ = Mock(return_value=response)

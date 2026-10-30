@@ -29,6 +29,13 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: SERVER_FORWARD_HEADERS_STRATEGY
+              value: framework
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: CORS_ALLOWED_ORIGINS
             # Frontend and API URLs are separate: allow secure cross-site cookies.
             - name: AUTH_COOKIE_SAME_SITE
               value: "None"
@@ -105,6 +112,7 @@ spec:
             httpGet:
               path: /health
               port: http
+            timeoutSeconds: 6
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:

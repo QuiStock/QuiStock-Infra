@@ -29,6 +29,27 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: AI_API_BASE_URL
+              value: http://api-chatbot.api-chatbot.svc.cluster.local
+            - name: AI_CONNECT_TIMEOUT_MS
+              value: "3000"
+            - name: AI_READ_TIMEOUT_MS
+              value: "24000"
+            - name: RUN_MIGRATIONS
+              value: "true"
+            - name: SERVER_FORWARD_HEADERS_STRATEGY
+              value: framework
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: CSRF_COOKIE_SECURE
+              value: "true"
+            - name: CSRF_COOKIE_SAME_SITE
+              value: "None"
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: CORS_ALLOWED_ORIGINS
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
@@ -75,6 +96,7 @@ spec:
             httpGet:
               path: /health/readiness
               port: http
+            timeoutSeconds: 6
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
