@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-auth
-          image: ghcr.io/quistock/ds-auth@sha256:ba08e13890945e1236e125ab1375807c147de0ec58e1f4c973966f828a2e05a6
+          image: ghcr.io/quistock/ds-auth@sha256:6fa64a98e12a62bee8da1e25252f452201ee01412164aea7d51845cf27265182
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

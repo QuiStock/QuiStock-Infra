@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-chatbot
-          image: REPLACE_WITH_CHATBOT_ARM64_IMAGE_DIGEST
+          image: ghcr.io/quistock/ai-multi-agent@sha256:e82fe73950735c91cdc17cb61c285446a81c93b8a0fc360e9daa832f8a74a914
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -61,7 +61,7 @@ spec:
               cpu: "1"
               memory: 1Gi
         - name: summary-worker
-          image: REPLACE_WITH_CHATBOT_WORKER_ARM64_IMAGE_DIGEST
+          image: ghcr.io/quistock/ai-multi-agent-worker@sha256:8d50da1372dd8abef114c4bd3d91dfdf618408a55a3b8f2e76950a8acea2acbb
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "src.memory.worker.run_summary_worker"]
           env:
