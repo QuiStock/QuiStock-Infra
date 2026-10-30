@@ -4,7 +4,16 @@ Esta atualização coordena o [Infra #40](https://github.com/QuiStock/QuiStock-I
 
 ## Imagens e branch
 
-Antes de executar `up`, as três referências de imagens (website, API IA e worker) devem conter os digests publicados das branches corrigidas. `preflight` recusa placeholders para evitar provisionar um cluster com binários incompatíveis. API e worker vêm da mesma revisão, em repositórios GHCR diferentes. Não copiar o digest da API para o worker.
+As cinco referências de imagens (Auth, Core, website, API IA e worker) foram preenchidas com os digests publicados das revisões abaixo. `preflight` recusa placeholders para evitar provisionar um cluster com binários incompatíveis. API e worker vêm da mesma revisão, em repositórios GHCR diferentes. Não copiar o digest da API para o worker.
+
+| Imagem | Revisão de origem | Publicação |
+|---|---|---|
+| Auth | `5874b506c70f52fb8e7e002ab661b1c0a7182db8` | [build](https://github.com/QuiStock/DS_Auth/actions/runs/41052761225) |
+| Core | `ef0e5ebc4a6840c17fbed47b32f6431de69677ee` | [build](https://github.com/QuiStock/DS_Backend/actions/runs/41052767285) |
+| Website | `686b6705b0f3f7dccb79ae5e811639fa17e21e92` | [build](https://github.com/QuiStock/quistock-dad/actions/runs/41052469568) |
+| IA API/worker | `85f70bdba344e18beec6387696f0fe29f27cdd61` | [build](https://github.com/QuiStock/AI_Multi-Agent/actions/runs/41053800800) |
+
+Os commits Auth/Core incluem apenas a alteração do publisher além da main analisada. Digests completos ficam nos manifests; arquitetura ARM64, revisão OCI e acesso anônimo GHCR foram conferidos.
 
 Os workflows `publish-image.yaml` aceitam `infra_ref=codex/learner-lab-runtime-update`. A primeira troca para a imagem específica do worker precisa de revisão da PR de imagem: a política de automerge continua recusando mudanças no nome do repositório. Nenhuma PR desta atualização é mesclada automaticamente por esta tarefa.
 
