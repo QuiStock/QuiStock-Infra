@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chatbot-config
+  namespace: api-chatbot
+data:
+  APP_ENVIRONMENT: production
+  AUTH_BYPASS_LOCAL_TESTS: "false"
+  AUTH_JWT_ALGORITHM: RS256
+  AUTH_JWT_JWK_SET_URI: http://api-auth.api-auth.svc.cluster.local/.well-known/jwks.json
+  AUTH_JWT_AUDIENCE: quistock-api
+  GEMINI_EMBEDDING_MODEL: gemini-embedding-2
+  GEMINI_EMBEDDING_TIER: free
+  SUMMARY_QUEUE_STREAM: quistock:conversation-summary
+  SUMMARY_QUEUE_GROUP: summary-workers
+  SUMMARY_JOB_MAX_ATTEMPTS: "5"
+  SUMMARY_RECONCILIATION_INTERVAL_SECONDS: "60"
+  MEMORY_CONVERSATIONS_COLLECTION: conversations
+  MEMORY_SUMMARY_JOBS_COLLECTION: conversation_summary_jobs
+  MEMORY_SUMMARY_LOCKS_COLLECTION: conversation_summary_locks
+  MEMORY_SUMMARY_COLLECTION: conversation_summaries
+  FAQ_VECTORSTORE_COLLECTION: faq_v2

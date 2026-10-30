@@ -60,7 +60,28 @@ run "private_gateway_contract" {
     error_message = "Website fallback and API paths must preserve application-owned authentication."
   }
   assert {
-    condition     = aws_apigatewayv2_api.edge.cors_configuration[0].allow_credentials && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_origins, "http://*") && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_origins, "https://*") && contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_headers, "authorization")
-    error_message = "Open browser origins must support cookie credentials and bearer headers."
+    condition     = length(aws_apigatewayv2_api.edge.cors_configuration) == 0
+    error_message = "Same-origin deployments must not allow arbitrary cross-origin cookies."
   }
+}
+
+run "explicit_external_origins" {
+  command = plan
+  variables {
+    cors_allowed_origins = ["https://website.example"]
+  }
+  assert {
+    condition = aws_apigatewayv2_api.edge.cors_configuration[0].allow_credentials && toset(aws_apigatewayv2_api.edge.cors_configuration[0].allow_origins) == toset(["https://website.example"]) && alltrue([
+      for header in ["authorization", "x-csrf-token", "x-xsrf-token"] : contains(aws_apigatewayv2_api.edge.cors_configuration[0].allow_headers, header)
+    ])
+    error_message = "Explicit origins must support both Auth and Core CSRF headers."
+  }
+}
+
+run "reject_wildcard_origin" {
+  command = plan
+  variables {
+    cors_allowed_origins = ["https://*"]
+  }
+  expect_failures = [var.cors_allowed_origins]
 }

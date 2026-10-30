@@ -11,6 +11,7 @@ import re
 import ssl
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,6 +21,25 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 SECRET_APPS = ("api-auth", "api-core", "api-chatbot")
 APPS = (*SECRET_APPS, "website")
+
+
+def allowed_origins(config):
+    origins = config.get("cors_allowed_origins", [])
+    if not isinstance(origins, list):
+        raise RuntimeError("cors_allowed_origins must be a list of exact HTTP(S) origins")
+    for origin in origins:
+        if not isinstance(origin, str):
+            raise RuntimeError("Invalid CORS origin")
+        parsed = urlsplit(origin)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.path or parsed.query or parsed.fragment or parsed.username
+                or any(c in origin for c in "*, \t\r\n")):
+            raise RuntimeError("Use exact CORS origins without wildcards or paths")
+        try:
+            parsed.port
+        except ValueError as error:
+            raise RuntimeError("Invalid CORS origin port") from error
+    return list(dict.fromkeys(origins))
 
 
 def validate_manifests():
@@ -94,6 +114,7 @@ class Lab:
         self.config = json.loads(Path(args.config).read_text(encoding="utf-8"))
         if "REPLACE_" in json.dumps(self.config):
             raise RuntimeError("Complete all REPLACE_ values in the configuration first.")
+        allowed_origins(self.config)
         for tool in ("aws", "terraform", "kubectl", "helm"):
             if not shutil.which(tool):
                 raise RuntimeError(f"Missing executable: {tool}")
@@ -133,6 +154,7 @@ class Lab:
             "region", "cluster_name", "kubernetes_version", "availability_zones",
             "admin_cidrs", "instance_types", "node_count", "addon_versions")}
         variables["account_id"] = self.account
+        variables["cors_allowed_origins"] = allowed_origins(self.config)
         variables["admin_role_arn"] = self.admin_principal()
         for kind in ("cluster", "node"):
             role = self.aws("iam", "get-role", "--role-name", self.config[f"{kind}_role_name"])["Role"]
@@ -253,6 +275,7 @@ class Lab:
         self.argocd(self.outputs())
         for app in SECRET_APPS:
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-namespace.yaml"])
+        self.runtime_config(self.outputs())
         run(["helm", "upgrade", "--install", "sm-operator", "bitwarden/sm-operator", "--namespace",
              "sm-operator-system", "--create-namespace", "--version", "2.0.3", "--wait", "--timeout", "10m"])
         run(["kubectl", "wait", "--for=condition=Established", "crd/bitwardensecrets.k8s.bitwarden.com", "--timeout=2m"])
@@ -266,11 +289,30 @@ class Lab:
                 stdin=json.dumps(secret), capture=True)
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/apps/{app}/bitwarden-secret.yaml"])
             self.wait_secret(app)
-            run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-application.yaml"])
+            self.apply_application(app)
             self.wait_application(app)
         del token
         self.verify(include_public=False)
         self.public()
+
+    def runtime_config(self, outputs):
+        """Generated gateway origin changes with each account; no credentials here."""
+        origins = list(dict.fromkeys([outputs["api_url"]["value"], *allowed_origins(self.config)]))
+        for app in ("api-auth", "api-core"):
+            manifest = {"apiVersion": "v1", "kind": "ConfigMap",
+                        "metadata": {"name": "api-runtime", "namespace": app},
+                        "data": {"CORS_ALLOWED_ORIGINS": ",".join(origins)}}
+            run(["kubectl", "apply", "-f", "-"], stdin=json.dumps(manifest))
+
+    def apply_application(self, app):
+        manifest = (ROOT / f"clusters/us-east1/bootstrap/{app}-application.yaml").read_text(encoding="utf-8")
+        ref = self.config.get("infra_ref", "main")
+        if not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", ref):
+            raise RuntimeError("Invalid infra_ref")
+        # JSON quoting is also valid YAML and avoids interpreting a ref as YAML.
+        manifest = re.sub(r"(?m)^(\s*targetRevision:) .+$",
+                          lambda match: match[1] + " " + json.dumps(ref), manifest)
+        run(["kubectl", "apply", "-f", "-"], stdin=manifest)
 
     def wait_secret(self, app):
         # Query only key names; secret values never enter this process or logs.
@@ -319,6 +361,29 @@ class Lab:
         self.init()
         return json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "output", "-json"], capture=True).stdout)
 
+    def memory(self):
+        """Run a one-off memory check/apply using the deployed worker image/config."""
+        if not self.args.vector_size or self.args.vector_size < 1:
+            raise RuntimeError("memory requires --vector-size with the verified embedding dimension")
+        self.kubeconfig()
+        deployment = json.loads(run(["kubectl", "get", "deployment", "api-chatbot", "-n", "api-chatbot",
+                                     "-o", "json"], capture=True).stdout)
+        pod = deployment["spec"]["template"]["spec"]
+        worker = next(c for c in pod["containers"] if c["name"] == "summary-worker")
+        mode = "--apply" if self.args.apply else "--check"
+        name = f"memory-{'apply' if self.args.apply else 'check'}-{time.time_ns()}"
+        container = {k: worker[k] for k in ("image", "imagePullPolicy", "env", "envFrom", "resources") if k in worker}
+        container.update(name="memory", command=["python", "-m", "scripts.provision_memory_collections",
+                                                  mode, "--vector-size", str(self.args.vector_size)])
+        spec = {k: pod[k] for k in ("nodeSelector", "imagePullSecrets", "securityContext") if k in pod}
+        spec.update(restartPolicy="Never", containers=[container])
+        job = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "namespace": "api-chatbot"},
+               "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 600, "ttlSecondsAfterFinished": 86400,
+                        "template": {"spec": spec}}}
+        run(["kubectl", "create", "-f", "-"], stdin=json.dumps(job))
+        print(f"Memory {mode}: {name}. Inspect logs with kubectl logs -n api-chatbot job/{name}")
+        run(["kubectl", "wait", "--for=condition=complete", f"job/{name}", "-n", "api-chatbot", "--timeout=10m"])
+
     def public(self):
         """Reconcile React and its proxy through the existing Terraform-owned gateway."""
         validate_manifests()
@@ -326,7 +391,8 @@ class Lab:
         outputs = self.outputs()
         target = outputs["edge_target_group_arn"]["value"]
         self.migrate_website()
-        run(["kubectl", "apply", "-f", ROOT / "clusters/us-east1/bootstrap/website-application.yaml"])
+        self.runtime_config(outputs)
+        self.apply_application("website")
         self.wait_application("website")
         run(["kubectl", "rollout", "status", "deployment/website", "-n", "website", "--timeout=10m"])
         for _ in range(120):
@@ -405,19 +471,31 @@ class Lab:
 
     def verify_public(self, url):
         # No tokens/passwords are used here. Real login remains an operator test.
-        origin = "https://development.example"
-        preflight = urllib.request.Request(url + "/auth/login", method="OPTIONS", headers={
-            "Origin": origin, "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "authorization,content-type"})
         for attempt in range(60):
             try:
-                with urllib.request.urlopen(preflight, timeout=10) as response:
-                    if response.status not in (200, 204) or response.headers.get("Access-Control-Allow-Origin") != origin or response.headers.get("Access-Control-Allow-Credentials") != "true":
-                        raise RuntimeError("Credentialed CORS preflight failed; inspect HTTP API CORS configuration.")
+                for origin in allowed_origins(self.config):
+                    preflight = urllib.request.Request(url + "/auth/login", method="OPTIONS", headers={
+                        "Origin": origin, "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "authorization,content-type,x-csrf-token,x-xsrf-token"})
+                    with urllib.request.urlopen(preflight, timeout=10) as response:
+                        if response.status not in (200, 204) or response.headers.get("Access-Control-Allow-Origin") != origin or response.headers.get("Access-Control-Allow-Credentials") != "true":
+                            raise RuntimeError("Credentialed CORS preflight failed; inspect HTTP API CORS configuration.")
                 for path in ("/auth/health", "/api/health/readiness", "/auth/.well-known/jwks.json"):
                     with urllib.request.urlopen(url + path, timeout=10) as response:
                         if response.status != 200:
                             raise RuntimeError(f"Public routing check failed: {path}")
+                with urllib.request.urlopen(url + "/auth/csrf", timeout=10) as response:
+                    if not json.load(response).get("token"):
+                        raise RuntimeError("Auth CSRF route did not return a token")
+                login = urllib.request.Request(url + "/auth/login", data=b"{}", method="POST",
+                                               headers={"Content-Type": "application/json", "Origin": url})
+                try:
+                    with urllib.request.urlopen(login, timeout=10):
+                        raise RuntimeError("Empty login unexpectedly succeeded")
+                except urllib.error.HTTPError as error:
+                    if error.code != 400:
+                        raise RuntimeError(f"Auth login routing/validation failed: HTTP {error.code}") from error
+                    error.close()
                 for path in ("/", "/index.html", "/home"):
                     with urllib.request.urlopen(url + path, timeout=10) as response:
                         html = response.read().lower()
@@ -451,10 +529,11 @@ class Lab:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "up", "update", "bootstrap", "verify", "public", "down"))
+    parser.add_argument("command", choices=("preflight", "up", "update", "bootstrap", "verify", "public", "memory", "down"))
     parser.add_argument("--config", required=True)
     parser.add_argument("--account", required=True)
-    parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update; otherwise only plan")
+    parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update, or provision new empty memory collections; otherwise plan/check only")
+    parser.add_argument("--vector-size", type=int, help="Verified embedding dimension; required for memory")
     parser.add_argument("--migrate-argocd-public", action="store_true", help="For update only: allow replacement/cleanup of the former Argo CD entry, never cluster/API resources")
     parser.add_argument("--confirm-destroy")
     parser.add_argument("--migrate-website", action="store_true", help="For up/bootstrap/public: replace the old edge with the website on NodePort 30080 (brief downtime)")

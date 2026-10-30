@@ -88,14 +88,16 @@ resource "aws_apigatewayv2_vpc_link" "edge" {
 resource "aws_apigatewayv2_api" "edge" {
   name          = "${var.cluster_name}-api"
   protocol_type = "HTTP"
-  cors_configuration {
-    # All browser HTTP(S) origins, including localhost. Scheme wildcards permit
-    # credentialed cookie requests; a literal '*' would not work in browsers.
-    allow_origins     = ["http://*", "https://*"]
-    allow_credentials = true
-    allow_methods     = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_headers     = ["authorization", "content-type", "accept", "x-requested-with", "x-csrf-token"]
-    max_age           = 300
+  dynamic "cors_configuration" {
+    for_each = length(var.cors_allowed_origins) == 0 ? [] : [var.cors_allowed_origins]
+    content {
+      # Same-origin website needs no CORS; external clients are explicitly listed.
+      allow_origins     = cors_configuration.value
+      allow_credentials = true
+      allow_methods     = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+      allow_headers     = ["authorization", "content-type", "accept", "x-requested-with", "x-csrf-token", "x-xsrf-token"]
+      max_age           = 300
+    }
   }
 }
 resource "aws_apigatewayv2_integration" "edge" {
