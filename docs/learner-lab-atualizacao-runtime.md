@@ -1,6 +1,6 @@
 # Teste em uma nova conta do Learner Lab
 
-Esta atualização coordena o Infra com [AI_Multi-Agent #39](https://github.com/QuiStock/AI_Multi-Agent/pull/39) e [quistock-dad #25](https://github.com/QuiStock/quistock-dad/pull/25). Não exige recriar os bancos externos. Nenhum recurso AWS foi aplicado durante a implementação.
+Esta atualização coordena o [Infra #40](https://github.com/QuiStock/QuiStock-Infra/pull/40) com [AI_Multi-Agent #39](https://github.com/QuiStock/AI_Multi-Agent/pull/39), [quistock-dad #25](https://github.com/QuiStock/quistock-dad/pull/25) e os publishers manuais de [Auth #13](https://github.com/QuiStock/DS_Auth/pull/13)/[Core #41](https://github.com/QuiStock/DS_Backend/pull/41). Não exige recriar os bancos externos. Nenhum recurso AWS foi aplicado durante a implementação.
 
 ## Imagens e branch
 
@@ -58,3 +58,12 @@ O Redis temporário continua sem persistência e agora tem probes. O valor `REDI
 Auth/Core recebem a origem pública gerada pela nova conta. CORS externo é opcional e exige a mesma lista no JSON; não há wildcard com cookies. URLs públicas de build não contêm secrets. Portas, NodePorts, ARM64, state isolado por conta e proteções contra substituição destrutiva foram preservados.
 
 Use também o runbook [learner-lab-feira.md](learner-lab-feira.md) para pré-requisitos, diagnóstico e desligamento.
+
+## Verificações desta implementação
+
+- Terraform 1.11.4: `validate` e quatro testes com provider AWS simulado passaram.
+- Bootstrap: 43 testes passaram, incluindo isolamento da conta, configuração de origens, revisão Argo e provisionamento de memória em modo check.
+- Nginx real em Docker: oito testes passaram, incluindo roteamento Auth/Core, prefixo encaminhado, cookies, CSRF, Origin e assets.
+- IA: lint/formatação e mypy em 164 arquivos passaram; 313 testes unitários e 31 de integração passaram. Um teste real Gemini foi pulado por falta de chave local. Os testes locais não consultaram os bancos externos nem os provedores reais.
+- Website: build com `/auth` e `/api`, 86 testes e publicação ARM64 passaram. O bundle compilado foi conferido sem os fallbacks localhost dos clientes.
+- AWS: plano/apply, bootstrap real, credenciais externas e testes funcionais com usuário real ficam para a nova sessão do Learner Lab.
