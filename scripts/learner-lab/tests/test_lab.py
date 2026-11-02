@@ -38,6 +38,12 @@ class SafetyTests(unittest.TestCase):
                 lab.Lab(Mock(config="config.json", account="123456789012"))
         aws.assert_not_called()
 
+    def test_distinct_runtime_credentials_cannot_share_a_bitwarden_item(self):
+        config = self.instance().config
+        config["bitwarden_secret_ids"]["OBSERVABILITY_SESSION_SECRET"] = config["bitwarden_secret_ids"]["TYPESAFE_API_KEY"]
+        with self.assertRaisesRegex(RuntimeError, "distinct"):
+            lab.runtime_secret_ids(config)
+
     def test_runtime_secrets_map_only_api_credentials(self):
         obj = self.instance()
         obj.wait_secret_keys = Mock()

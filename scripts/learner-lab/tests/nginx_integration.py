@@ -33,8 +33,11 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                               "proto": self.headers.get("X-Forwarded-Proto")}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Set-Cookie", "access_token=fixture; Path=/; Secure; HttpOnly")
-        self.send_header("Set-Cookie", "refresh_token=fixture; Path=/; Secure; HttpOnly")
+        if self.server.service == "ai":
+            self.send_header("Set-Cookie", "observability_session=fixture; Path=/api/v1/observability; Secure; HttpOnly; SameSite=None")
+        else:
+            self.send_header("Set-Cookie", "access_token=fixture; Path=/; Secure; HttpOnly")
+            self.send_header("Set-Cookie", "refresh_token=fixture; Path=/; Secure; HttpOnly")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -108,10 +111,10 @@ class ProxyIntegration(unittest.TestCase):
         subprocess.run(["docker", "network", "rm", cls.network], check=False, stdout=subprocess.PIPE)
         cls.temp.cleanup()
 
-    def request(self, path, method="GET", body=None):
+    def request(self, path, method="GET", body=None, cookie="refresh_token=fixture"):
         req = urllib.request.Request(self.url + path, method=method,
                                      data=body.encode() if body is not None else None,
-                                     headers={"Authorization": "Bearer fixture", "Cookie": "refresh_token=fixture",
+                                     headers={"Authorization": "Bearer fixture", "Cookie": cookie,
                                               "Origin": "https://any-site.example", "Content-Type": "application/json",
                                               "X-CSRF-TOKEN": "auth-fixture", "X-XSRF-TOKEN": "core-fixture"})
         with urllib.request.urlopen(req, timeout=5) as r:
@@ -119,11 +122,25 @@ class ProxyIntegration(unittest.TestCase):
 
     def test_observe_api_keeps_native_path_body_and_cookie(self):
         body = '{"email":"fixture@example.com","password":"fixture"}'
-        result, headers = self.request("/api/v1/observability/auth/login?test=1", "POST", body)
+        result, headers = self.request("/api/v1/observability/login?test=1", "POST", body,
+                                       cookie="observability_session=fixture")
         self.assertEqual((result["service"], result["path"], result["body"]),
-                         ("ai", "/api/v1/observability/auth/login?test=1", body))
-        self.assertEqual(result["cookie"], "refresh_token=fixture")
+                         ("ai", "/api/v1/observability/login?test=1", body))
+        self.assertEqual(result["cookie"], "observability_session=fixture")
+        self.assertIn("Path=/api/v1/observability;", headers["Set-Cookie"])
+        self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("no-store", headers["Cache-Control"])
+
+    def test_observe_redirect_stays_relative_and_preserves_query(self):
+        connection = http.client.HTTPConnection(self.url.removeprefix("http://"))
+        try:
+            connection.request("GET", "/observe?screen=lab")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 308)
+            self.assertEqual(response.getheader("Location"), "/observe/?screen=lab")
+            response.read()
+        finally:
+            connection.close()
 
     def test_observe_frontend_keeps_subpath(self):
         result, _ = self.request("/observe/assets/app.js")

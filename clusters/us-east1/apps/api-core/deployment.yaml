@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-core
-          image: ghcr.io/quistock/ds-backend@sha256:5f168f4166db87932f53a8d44b24dec9de4cea2bfbbe2f4e20a682d96550453d
+          image: ghcr.io/quistock/ds-backend@sha256:3e16483d8f6603f802df3116e6e8a7052cdcf8aa894be62efab3c5d542e3d81f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
