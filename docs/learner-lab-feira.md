@@ -1,5 +1,7 @@
 # QuiStock no AWS Academy Learner Lab
 
+> Para o teste atual antes do merge, siga [o roteiro atômico](teste-aws-passo-a-passo.md). Este documento registra a preparação anterior.
+
 ## Desenho mínimo
 
 Quatro Deployments de aplicação: Auth, Core, chatbot e website. O container

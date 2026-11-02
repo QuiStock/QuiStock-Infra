@@ -33,6 +33,8 @@ def runtime_secret_ids(config):
             UUID(values[key])
         except (KeyError, ValueError, TypeError, AttributeError):
             raise RuntimeError(f"Configure bitwarden_secret_ids.{key} with the Bitwarden item ID, not its value") from None
+    if len({str(UUID(values[key])) for key in RUNTIME_SECRET_KEYS}) != len(RUNTIME_SECRET_KEYS):
+        raise RuntimeError("Runtime credentials must use distinct Bitwarden item IDs")
     return {key: values[key] for key in RUNTIME_SECRET_KEYS}
 
 
