@@ -13,6 +13,10 @@ ALLOWED_FILES = {
     f"clusters/us-east1/apps/{service}/deployment.yaml"
     for service in ("api-auth", "api-core", "api-chatbot", "website", "observe")
 }
+AUTOMATION_BRANCH = re.compile(
+    r"codex/deploy(?:/|-)(?:api-auth|api-core|api-chatbot|website|observe)-"
+    r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+)
 IMAGE_LINE = re.compile(
     r"(?P<prefix>[ \t]+image:[ \t]+)(?P<image>[^\s'\"#]+)(?P<suffix>[ \t]*(?:#.*)?)"
 )
@@ -56,12 +60,18 @@ def validate_images(before, after):
 
 
 def main():
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+    if not AUTOMATION_BRANCH.fullmatch(event["pull_request"]["head"]["ref"]):
+        print("Skipping PR: not an automated image-update branch")
+        return
     if not os.environ.get("GH_TOKEN"):
         raise ValueError("The INFRA_REPO_TOKEN organization secret is required")
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     number = event["pull_request"]["number"]
     repo = os.environ["GITHUB_REPOSITORY"]
     pr = api(f"repos/{repo}/pulls/{number}")
+    if not AUTOMATION_BRANCH.fullmatch(pr["head"]["ref"]):
+        print("Skipping PR: current branch is not an automated image update")
+        return
     # The same PAT opens the PR in the service workflow. No hardcoded username.
     if pr["user"]["id"] != api("user")["id"]:
         print("Skipping PR: author is not the owner of INFRA_REPO_TOKEN")

@@ -6,7 +6,9 @@ on:
       - 'terraform/lab/**'
       - 'scripts/learner-lab/**'
       - 'clusters/us-east1/**'
+      - '.github/scripts/**'
       - '.github/workflows/eks-validate.yml'
+      - '.github/workflows/image-update-automerge.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +35,7 @@ jobs:
       - run: terraform -chdir=terraform/lab validate -no-color
       - run: terraform -chdir=terraform/lab test -no-color
       - run: python -m unittest discover -s scripts/learner-lab/tests -v
+      - run: python -m unittest discover -s .github/scripts/tests -v
       - run: python scripts/learner-lab/tests/nginx_integration.py
       - run: kubectl kustomize clusters/us-east1/apps/website > /tmp/website.yaml
       - run: |
