@@ -23,19 +23,30 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-chatbot
-          image: ghcr.io/quistock/ai-multi-agent@sha256:9eadf7fd838b911cd65ce59dd7d8ad48061d701822a5a5713b525edade35bbc0
+          image: ghcr.io/quistock/ai-multi-agent@sha256:c36b5ac236f1d4950a05ea92f202163af767e7e2e9c739718c9d021f8132c636
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8000
           env:
+            - name: PORT
+              value: "8000"
+            - name: OBSERVABILITY_FRONTEND_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: OBSERVABILITY_FRONTEND_ORIGIN
             - name: AUTH_BYPASS_LOCAL_TESTS
               value: "false"
             - name: APP_ENVIRONMENT
               value: "production"
           envFrom:
+            - configMapRef:
+                name: chatbot-config
             - secretRef:
                 name: chatbot-external
+            - secretRef:
+                name: chatbot-runtime-external
           startupProbe:
             tcpSocket:
               port: http
@@ -45,8 +56,8 @@ spec:
             httpGet:
               path: /health
               port: http
-            timeoutSeconds: 20
-            periodSeconds: 30
+            timeoutSeconds: 40
+            periodSeconds: 45
           livenessProbe:
             tcpSocket:
               port: http
@@ -59,7 +70,7 @@ spec:
               cpu: "1"
               memory: 1Gi
         - name: summary-worker
-          image: ghcr.io/quistock/ai-multi-agent@sha256:df23d2f1bbf21923f0050ad0012d684f3e2339d5bf5e2123675d392690e73690
+          image: ghcr.io/quistock/ai-multi-agent-worker@sha256:a4867cb3273c027d723b178f3163df48b0227c26df6ccafe5010ea8f5f542051
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "src.memory.worker.run_summary_worker"]
           env:
@@ -68,6 +79,8 @@ spec:
             - name: APP_ENVIRONMENT
               value: "production"
           envFrom:
+            - configMapRef:
+                name: chatbot-config
             - secretRef:
                 name: chatbot-external
           resources:

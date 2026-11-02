@@ -23,12 +23,32 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-auth
-          image: ghcr.io/quistock/ds-auth@sha256:ba08e13890945e1236e125ab1375807c147de0ec58e1f4c973966f828a2e05a6
+          image: ghcr.io/quistock/ds-auth@sha256:23193da1cdad9366a9531620625a8fc49005eefc177892f6e793044e75a75f77
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           env:
+            # Shared test database: schema is managed outside this deployment.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SPRING_LIQUIBASE_ENABLED
+              value: "false"
+            - name: SPRING_SQL_INIT_MODE
+              value: "never"
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "none"
+            - name: SPRING_JPA_GENERATE_DDL
+              value: "false"
+            - name: SERVER_FORWARD_HEADERS_STRATEGY
+              value: framework
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: CORS_ALLOWED_ORIGINS
             # Frontend and API URLs are separate: allow secure cross-site cookies.
             - name: AUTH_COOKIE_SAME_SITE
               value: "None"
@@ -105,6 +125,7 @@ spec:
             httpGet:
               path: /health
               port: http
+            timeoutSeconds: 6
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: observe
+  namespace: observe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: observe
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: observe
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: observe
+          image: ghcr.io/quistock/ai-observe@sha256:6139dcdb96b13fb0b0c6d6f81f892696384982ea51d39223c0c0edea9d6c1bca
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /observe-health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /observe-health
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi

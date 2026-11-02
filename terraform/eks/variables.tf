@@ -54,6 +54,17 @@ variable "node_count" {
     error_message = "A capacidade deve ser um inteiro positivo."
   }
 }
+variable "cors_allowed_origins" {
+  type        = list(string)
+  default     = []
+  description = "Origens externas exatas autorizadas com cookies. O website no próprio gateway não exige CORS."
+  validation {
+    condition = alltrue([for origin in var.cors_allowed_origins :
+      can(regex("^https?://[^/*?#,[:space:]]+(:[0-9]+)?$", origin))
+    ])
+    error_message = "Use origens HTTP(S) exatas, sem wildcard, path ou barra final."
+  }
+}
 variable "addon_versions" {
   type = object({ vpc_cni = string, coredns = string, kube_proxy = string })
 }

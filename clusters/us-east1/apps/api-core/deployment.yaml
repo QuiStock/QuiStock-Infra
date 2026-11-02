@@ -23,12 +23,46 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: api-core
-          image: ghcr.io/quistock/ds-backend@sha256:040d3253608f0b28d044c614591bbc74ca27dad454e617c570427b28e31c9b11
+          image: ghcr.io/quistock/ds-backend@sha256:3e16483d8f6603f802df3116e6e8a7052cdcf8aa894be62efab3c5d542e3d81f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           env:
+            # Shared test database: schema is managed outside this deployment.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SPRING_LIQUIBASE_ENABLED
+              value: "false"
+            - name: SPRING_SQL_INIT_MODE
+              value: "never"
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "none"
+            - name: SPRING_JPA_GENERATE_DDL
+              value: "false"
+            - name: ANALYSIS_SCHEDULE_ENABLED
+              value: "false"
+            - name: AI_API_BASE_URL
+              value: http://api-chatbot.api-chatbot.svc.cluster.local
+            - name: AI_CONNECT_TIMEOUT_MS
+              value: "3000"
+            - name: AI_READ_TIMEOUT_MS
+              value: "24000"
+            - name: SERVER_FORWARD_HEADERS_STRATEGY
+              value: framework
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: CSRF_COOKIE_SECURE
+              value: "true"
+            - name: CSRF_COOKIE_SAME_SITE
+              value: "None"
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: CORS_ALLOWED_ORIGINS
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
@@ -75,6 +109,7 @@ spec:
             httpGet:
               path: /health/readiness
               port: http
+            timeoutSeconds: 6
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:

@@ -11,15 +11,50 @@ import re
 import ssl
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[2]
 SECRET_APPS = ("api-auth", "api-core", "api-chatbot")
-APPS = (*SECRET_APPS, "website")
+PUBLIC_APPS = ("observe", "website")
+APPS = (*SECRET_APPS, *PUBLIC_APPS)
+RUNTIME_SECRET_KEYS = ("TYPESAFE_API_KEY", "OBSERVABILITY_SESSION_SECRET")
+
+
+def runtime_secret_ids(config):
+    values = config.get("bitwarden_secret_ids", {})
+    for key in RUNTIME_SECRET_KEYS:
+        try:
+            UUID(values[key])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            raise RuntimeError(f"Configure bitwarden_secret_ids.{key} with the Bitwarden item ID, not its value") from None
+    if len({str(UUID(values[key])) for key in RUNTIME_SECRET_KEYS}) != len(RUNTIME_SECRET_KEYS):
+        raise RuntimeError("Runtime credentials must use distinct Bitwarden item IDs")
+    return {key: values[key] for key in RUNTIME_SECRET_KEYS}
+
+
+def allowed_origins(config):
+    origins = config.get("cors_allowed_origins", [])
+    if not isinstance(origins, list):
+        raise RuntimeError("cors_allowed_origins must be a list of exact HTTP(S) origins")
+    for origin in origins:
+        if not isinstance(origin, str):
+            raise RuntimeError("Invalid CORS origin")
+        parsed = urlsplit(origin)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.path or parsed.query or parsed.fragment or parsed.username
+                or any(c in origin for c in "*, \t\r\n")):
+            raise RuntimeError("Use exact CORS origins without wildcards or paths")
+        try:
+            parsed.port
+        except ValueError as error:
+            raise RuntimeError("Invalid CORS origin port") from error
+    return list(dict.fromkeys(origins))
 
 
 def validate_manifests():
@@ -94,6 +129,8 @@ class Lab:
         self.config = json.loads(Path(args.config).read_text(encoding="utf-8"))
         if "REPLACE_" in json.dumps(self.config):
             raise RuntimeError("Complete all REPLACE_ values in the configuration first.")
+        allowed_origins(self.config)
+        runtime_secret_ids(self.config)
         for tool in ("aws", "terraform", "kubectl", "helm"):
             if not shutil.which(tool):
                 raise RuntimeError(f"Missing executable: {tool}")
@@ -133,6 +170,7 @@ class Lab:
             "region", "cluster_name", "kubernetes_version", "availability_zones",
             "admin_cidrs", "instance_types", "node_count", "addon_versions")}
         variables["account_id"] = self.account
+        variables["cors_allowed_origins"] = allowed_origins(self.config)
         variables["admin_role_arn"] = self.admin_principal()
         for kind in ("cluster", "node"):
             role = self.aws("iam", "get-role", "--role-name", self.config[f"{kind}_role_name"])["Role"]
@@ -253,6 +291,7 @@ class Lab:
         self.argocd(self.outputs())
         for app in SECRET_APPS:
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-namespace.yaml"])
+        self.runtime_config(self.outputs())
         run(["helm", "upgrade", "--install", "sm-operator", "bitwarden/sm-operator", "--namespace",
              "sm-operator-system", "--create-namespace", "--version", "2.0.3", "--wait", "--timeout", "10m"])
         run(["kubectl", "wait", "--for=condition=Established", "crd/bitwardensecrets.k8s.bitwarden.com", "--timeout=2m"])
@@ -266,11 +305,47 @@ class Lab:
                 stdin=json.dumps(secret), capture=True)
             run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/apps/{app}/bitwarden-secret.yaml"])
             self.wait_secret(app)
-            run(["kubectl", "apply", "-f", ROOT / f"clusters/us-east1/bootstrap/{app}-application.yaml"])
+            if app == "api-chatbot":
+                self.apply_runtime_secrets()
+            self.apply_application(app)
             self.wait_application(app)
         del token
         self.verify(include_public=False)
         self.public()
+
+    def runtime_config(self, outputs):
+        """Generated gateway origin changes with each account; no credentials here."""
+        origins = list(dict.fromkeys([outputs["api_url"]["value"], *allowed_origins(self.config)]))
+        for app in ("api-auth", "api-core"):
+            manifest = {"apiVersion": "v1", "kind": "ConfigMap",
+                        "metadata": {"name": "api-runtime", "namespace": app},
+                        "data": {"CORS_ALLOWED_ORIGINS": ",".join(origins)}}
+            run(["kubectl", "apply", "-f", "-"], stdin=json.dumps(manifest))
+        manifest = {"apiVersion": "v1", "kind": "ConfigMap",
+                    "metadata": {"name": "api-runtime", "namespace": "api-chatbot"},
+                    "data": {"OBSERVABILITY_FRONTEND_ORIGIN": outputs["api_url"]["value"].rstrip("/")}}
+        run(["kubectl", "apply", "-f", "-"], stdin=json.dumps(manifest))
+
+    def apply_runtime_secrets(self):
+        ids = runtime_secret_ids(self.config)
+        manifest = {"apiVersion": "k8s.bitwarden.com/v1", "kind": "BitwardenSecret",
+                    "metadata": {"name": "chatbot-runtime-external", "namespace": "api-chatbot"},
+                    "spec": {"organizationId": "d899c2d7-c159-487d-947b-b4dc000da634",
+                             "secretName": "chatbot-runtime-external", "onlyMappedSecrets": True,
+                             "authToken": {"secretName": "bw-auth-token", "secretKey": "token"},
+                             "map": [{"bwSecretId": item, "secretKeyName": key} for key, item in ids.items()]}}
+        run(["kubectl", "apply", "-f", "-"], stdin=json.dumps(manifest))
+        self.wait_secret_keys("api-chatbot", "chatbot-runtime-external", set(ids))
+
+    def apply_application(self, app):
+        manifest = (ROOT / f"clusters/us-east1/bootstrap/{app}-application.yaml").read_text(encoding="utf-8")
+        ref = self.config.get("infra_ref", "main")
+        if not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", ref):
+            raise RuntimeError("Invalid infra_ref")
+        # JSON quoting is also valid YAML and avoids interpreting a ref as YAML.
+        manifest = re.sub(r"(?m)^(\s*targetRevision:) .+$",
+                          lambda match: match[1] + " " + json.dumps(ref), manifest)
+        run(["kubectl", "apply", "-f", "-"], stdin=manifest)
 
     def wait_secret(self, app):
         # Query only key names; secret values never enter this process or logs.
@@ -278,8 +353,11 @@ class Lab:
         required = set(re.findall(r"^\s+secretKeyName:\s*(\S+)\s*$", manifest, re.MULTILINE))
         if not required:
             raise RuntimeError(f"No mapped Bitwarden keys for {app}")
+        self.wait_secret_keys(app, app.removeprefix("api-") + "-external", required)
+
+    def wait_secret_keys(self, app, name, required):
         for _ in range(120):
-            r = run(["kubectl", "get", "secret", app.removeprefix("api-") + "-external", "-n", app,
+            r = run(["kubectl", "get", "secret", name, "-n", app,
                      "-o", 'go-template={{range $k,$v := .data}}{{$k}}{{"\\n"}}{{end}}'], capture=True, check=False)
             if r.returncode == 0 and required <= set(r.stdout.splitlines()):
                 return
@@ -305,19 +383,64 @@ class Lab:
             self.wait_secret(app)
             self.wait_application(app)
             run(["kubectl", "rollout", "status", f"deployment/{app}", "-n", app, "--timeout=10m"])
+        self.wait_secret_keys("api-chatbot", "chatbot-runtime-external", set(RUNTIME_SECRET_KEYS))
         run(["kubectl", "get", "pods", "-A"])
         if include_public:
-            self.wait_application("website")
-            run(["kubectl", "rollout", "status", "deployment/website", "-n", "website", "--timeout=10m"])
+            for app in PUBLIC_APPS:
+                self.wait_application(app)
+                run(["kubectl", "rollout", "status", f"deployment/{app}", "-n", app, "--timeout=10m"])
             outputs = self.outputs()
             self.verify_public(outputs["api_url"]["value"])
             self.verify_argocd(outputs)
-        print("All four applications ready. Complete functional tests in the runbook." if include_public
+        print("All five applications ready. Complete functional tests in the runbook." if include_public
               else "Internal applications ready; website publication follows.")
 
     def outputs(self):
         self.init()
         return json.loads(run(["terraform", f"-chdir={ROOT / 'terraform/eks'}", "output", "-json"], capture=True).stdout)
+
+    def memory(self):
+        """Run a one-off memory check/apply using the deployed worker image/config."""
+        if not self.args.vector_size or self.args.vector_size < 1:
+            raise RuntimeError("memory requires --vector-size with the verified embedding dimension")
+        self.kubeconfig()
+        deployment = json.loads(run(["kubectl", "get", "deployment", "api-chatbot", "-n", "api-chatbot",
+                                     "-o", "json"], capture=True).stdout)
+        pod = deployment["spec"]["template"]["spec"]
+        worker = next(c for c in pod["containers"] if c["name"] == "summary-worker")
+        mode = "--apply" if self.args.apply else "--check"
+        name = f"memory-{'apply' if self.args.apply else 'check'}-{time.time_ns()}"
+        container = {k: worker[k] for k in ("image", "imagePullPolicy", "env", "envFrom", "resources") if k in worker}
+        container.update(name="memory", command=["python", "-m", "src.ops.memory",
+                                                  mode, "--vector-size", str(self.args.vector_size)])
+        spec = {k: pod[k] for k in ("nodeSelector", "imagePullSecrets", "securityContext") if k in pod}
+        spec.update(restartPolicy="Never", containers=[container])
+        job = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "namespace": "api-chatbot"},
+               "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 600, "ttlSecondsAfterFinished": 86400,
+                        "template": {"spec": spec}}}
+        run(["kubectl", "create", "-f", "-"], stdin=json.dumps(job))
+        print(f"Memory {mode}: {name}. Inspect logs with kubectl logs -n api-chatbot job/{name}")
+        run(["kubectl", "wait", "--for=condition=complete", f"job/{name}", "-n", "api-chatbot", "--timeout=10m"])
+
+    def faq(self):
+        """Use the same one-off job policy as memory, with no embedding calls in check."""
+        self.kubeconfig()
+        deployment = json.loads(run(["kubectl", "get", "deployment", "api-chatbot", "-n", "api-chatbot",
+                                     "-o", "json"], capture=True).stdout)
+        pod = deployment["spec"]["template"]["spec"]
+        worker = next(c for c in pod["containers"] if c["name"] == "summary-worker")
+        mode = "--apply" if self.args.apply else "--check"
+        name = f"faq-{'apply' if self.args.apply else 'check'}-{time.time_ns()}"
+        container = {k: worker[k] for k in ("image", "imagePullPolicy", "env", "envFrom", "resources") if k in worker}
+        container.update(name="faq", command=["python", "-m", "src.ops.faq", mode])
+        spec = {k: pod[k] for k in ("nodeSelector", "imagePullSecrets", "securityContext") if k in pod}
+        spec.update(restartPolicy="Never", containers=[container])
+        job = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "namespace": "api-chatbot"},
+               "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 1800, "ttlSecondsAfterFinished": 86400,
+                        "template": {"spec": spec}}}
+        run(["kubectl", "create", "-f", "-"], stdin=json.dumps(job))
+        print(f"FAQ {mode}: {name}. Inspect logs with kubectl logs -n api-chatbot job/{name}")
+        run(["kubectl", "wait", "--for=condition=complete", f"job/{name}", "-n", "api-chatbot", "--timeout=30m"])
 
     def public(self):
         """Reconcile React and its proxy through the existing Terraform-owned gateway."""
@@ -326,9 +449,11 @@ class Lab:
         outputs = self.outputs()
         target = outputs["edge_target_group_arn"]["value"]
         self.migrate_website()
-        run(["kubectl", "apply", "-f", ROOT / "clusters/us-east1/bootstrap/website-application.yaml"])
-        self.wait_application("website")
-        run(["kubectl", "rollout", "status", "deployment/website", "-n", "website", "--timeout=10m"])
+        self.runtime_config(outputs)
+        for app in PUBLIC_APPS:
+            self.apply_application(app)
+            self.wait_application(app)
+            run(["kubectl", "rollout", "status", f"deployment/{app}", "-n", app, "--timeout=10m"])
         for _ in range(120):
             targets = self.aws("elbv2", "describe-target-health", "--target-group-arn", target)["TargetHealthDescriptions"]
             if targets and all(t["TargetHealth"]["State"] == "healthy" for t in targets):
@@ -339,6 +464,7 @@ class Lab:
         self.verify_public(outputs["api_url"]["value"])
         print(f"API HTTPS: {outputs['api_url']['value']}")
         print(f"Website HTTPS: {outputs['api_url']['value']}")
+        print(f"Observe HTTPS: {outputs['api_url']['value']}/observe/")
         print(f"Core: {outputs['core_url']['value']}")
         print(f"Auth: {outputs['auth_url']['value']}")
         self.verify_argocd(outputs)
@@ -405,24 +531,46 @@ class Lab:
 
     def verify_public(self, url):
         # No tokens/passwords are used here. Real login remains an operator test.
-        origin = "https://development.example"
-        preflight = urllib.request.Request(url + "/auth/login", method="OPTIONS", headers={
-            "Origin": origin, "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "authorization,content-type"})
         for attempt in range(60):
             try:
-                with urllib.request.urlopen(preflight, timeout=10) as response:
-                    if response.status not in (200, 204) or response.headers.get("Access-Control-Allow-Origin") != origin or response.headers.get("Access-Control-Allow-Credentials") != "true":
-                        raise RuntimeError("Credentialed CORS preflight failed; inspect HTTP API CORS configuration.")
+                for origin in allowed_origins(self.config):
+                    preflight = urllib.request.Request(url + "/auth/login", method="OPTIONS", headers={
+                        "Origin": origin, "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "authorization,content-type,x-csrf-token,x-xsrf-token"})
+                    with urllib.request.urlopen(preflight, timeout=10) as response:
+                        if response.status not in (200, 204) or response.headers.get("Access-Control-Allow-Origin") != origin or response.headers.get("Access-Control-Allow-Credentials") != "true":
+                            raise RuntimeError("Credentialed CORS preflight failed; inspect HTTP API CORS configuration.")
                 for path in ("/auth/health", "/api/health/readiness", "/auth/.well-known/jwks.json"):
                     with urllib.request.urlopen(url + path, timeout=10) as response:
                         if response.status != 200:
                             raise RuntimeError(f"Public routing check failed: {path}")
+                with urllib.request.urlopen(url + "/auth/csrf", timeout=10) as response:
+                    if not json.load(response).get("token"):
+                        raise RuntimeError("Auth CSRF route did not return a token")
+                login = urllib.request.Request(url + "/auth/login", data=b"{}", method="POST",
+                                               headers={"Content-Type": "application/json", "Origin": url})
+                try:
+                    with urllib.request.urlopen(login, timeout=10):
+                        raise RuntimeError("Empty login unexpectedly succeeded")
+                except urllib.error.HTTPError as error:
+                    if error.code != 400:
+                        raise RuntimeError(f"Auth login routing/validation failed: HTTP {error.code}") from error
+                    error.close()
                 for path in ("/", "/index.html", "/home"):
                     with urllib.request.urlopen(url + path, timeout=10) as response:
                         html = response.read().lower()
                         if response.status != 200 or "text/html" not in response.headers.get("Content-Type", "") or b"<html" not in html:
                             raise RuntimeError(f"React website/SPA routing check failed: {path}")
+                with urllib.request.urlopen(url + "/observe/", timeout=10) as response:
+                    if response.status != 200 or "text/html" not in response.headers.get("Content-Type", ""):
+                        raise RuntimeError("Observe frontend routing failed")
+                try:
+                    with urllib.request.urlopen(url + "/api/v1/observability/lab/models", timeout=10):
+                        raise RuntimeError("Observe API is accessible without a session")
+                except urllib.error.HTTPError as error:
+                    if error.code != 401:
+                        raise RuntimeError(f"Observe authentication/routing failed: HTTP {error.code}") from error
+                    error.close()
                 return
             except (urllib.error.URLError, TimeoutError):
                 if attempt == 59:
@@ -451,10 +599,11 @@ class Lab:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "up", "update", "bootstrap", "verify", "public", "down"))
+    parser.add_argument("command", choices=("preflight", "up", "update", "bootstrap", "verify", "public", "memory", "faq", "down"))
     parser.add_argument("--config", required=True)
     parser.add_argument("--account", required=True)
-    parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update; otherwise only plan")
+    parser.add_argument("--apply", action="store_true", help="Apply the saved plan for up/update, or provision new empty memory collections; otherwise plan/check only")
+    parser.add_argument("--vector-size", type=int, help="Verified embedding dimension; required for memory")
     parser.add_argument("--migrate-argocd-public", action="store_true", help="For update only: allow replacement/cleanup of the former Argo CD entry, never cluster/API resources")
     parser.add_argument("--confirm-destroy")
     parser.add_argument("--migrate-website", action="store_true", help="For up/bootstrap/public: replace the old edge with the website on NodePort 30080 (brief downtime)")

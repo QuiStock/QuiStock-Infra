@@ -31,7 +31,8 @@ em [website](apps/website/README.md) e [chatbot](apps/api-chatbot/README.md).
 
 Core recebe `/api/products` como `/products`; Auth recebe `/auth/login` como
 `/auth/login`, conforme sua imagem atual. Core consulta JWKS por DNS interno.
-CORS continua aberto para origens HTTP/HTTPS com cookies. Os novos Services
+CORS externo exige origens exatas em `cors_allowed_origins`. O bootstrap gera
+`api-runtime` em Auth/Core com o endereço da nova conta e as origens configuradas. Os novos Services
 habilitam conectividade interna; as aplicações ainda precisam implementar a
 integração Core/chatbot e compatibilizar sua autenticação.
 
