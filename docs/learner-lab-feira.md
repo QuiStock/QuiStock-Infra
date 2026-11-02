@@ -1,5 +1,6 @@
 # QuiStock no AWS Academy Learner Lab
 
+> Para reconstruir uma conta vazia, use [o guia atual com comandos PowerShell](deploy-aws-do-zero.md). Acesso ao Argo CD e rotação de secrets estão em [comandos de operação](comandos-operacao-aws.md).
 > Para o teste atual antes do merge, siga [o roteiro atômico](teste-aws-passo-a-passo.md). Este documento registra a preparação anterior.
 
 ## Desenho mínimo
