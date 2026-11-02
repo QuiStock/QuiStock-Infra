@@ -1,0 +1,20 @@
+{
+  "region": "us-east-1",
+  "cluster_name": "quistock",
+  "infra_ref": "REPLACE_WITH_VALIDATED_GIT_COMMIT",
+  "cors_allowed_origins": [],
+  "bitwarden_secret_ids": {
+    "TYPESAFE_API_KEY": "REPLACE_WITH_BITWARDEN_ITEM_ID",
+    "OBSERVABILITY_SESSION_SECRET": "REPLACE_WITH_BITWARDEN_ITEM_ID"
+  },
+  "availability_zones": [
+    "us-east-1a",
+    "us-east-1b"
+  ],
+  "admin_cidrs": [
+    "REPLACE_WITH_OPERATOR_IP/32"
+  ],
+  "ami_id": "ami-09a93d801db0bafae",
+  "k3s_version": "v1.37.1+k3s1",
+  "instance_type": "t4g.large"
+}
