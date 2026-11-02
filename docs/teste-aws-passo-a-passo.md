@@ -1,7 +1,7 @@
 # Teste completo na AWS antes do merge
 
-Estado: preparação de código; nenhuma etapa AWS deste roteiro foi executada. Primeiro passo pendente: criação de `OBSERVABILITY_SESSION_SECRET`.
-Execute uma linha por vez, confirme a evidência e só então avance. No chat, o acompanhamento começa no passo 1.
+Estado: infraestrutura criada e fluxos principais validados no Learner Lab em 02/11/2026, antes do merge. Evidências e limites em [resultado do teste](resultado-teste-aws-2026-11-02.md). Este roteiro permanece como instrução para reproduzir o deploy em uma conta vazia.
+Execute uma linha por vez, confirme a evidência e só então avance. Em uma nova execução, o acompanhamento começa no passo 1.
 O PostgreSQL de teste já existe e é compartilhado entre os projetos. Nenhuma migração, criação automática de schema ou inicialização SQL será executada por este deploy. Se faltar estrutura, interrompa o teste e informe a incompatibilidade, sem aplicar DDL.
 O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemini e TypeSafe são dependências externas e precisam estar disponíveis; este Terraform não as cria.
 
