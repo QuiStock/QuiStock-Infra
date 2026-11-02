@@ -3,6 +3,10 @@
   "cluster_name": "quistock",
   "infra_ref": "main",
   "cors_allowed_origins": [],
+  "bitwarden_secret_ids": {
+    "TYPESAFE_API_KEY": "REPLACE_WITH_BITWARDEN_ITEM_ID",
+    "OBSERVABILITY_SESSION_SECRET": "REPLACE_WITH_BITWARDEN_ITEM_ID"
+  },
   "kubernetes_version": "REPLACE_WITH_STANDARD_SUPPORT_VERSION",
   "cluster_role_name": "LabRole",
   "node_role_name": "REPLACE_WITH_LAB_EKS_NODE_ROLE_NAME",

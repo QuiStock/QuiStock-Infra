@@ -29,6 +29,8 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: ANALYSIS_SCHEDULE_ENABLED
+              value: "false"
             - name: AI_API_BASE_URL
               value: http://api-chatbot.api-chatbot.svc.cluster.local
             - name: AI_CONNECT_TIMEOUT_MS

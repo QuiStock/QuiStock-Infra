@@ -29,6 +29,13 @@ spec:
             - name: http
               containerPort: 8000
           env:
+            - name: PORT
+              value: "8000"
+            - name: OBSERVABILITY_FRONTEND_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: api-runtime
+                  key: OBSERVABILITY_FRONTEND_ORIGIN
             - name: AUTH_BYPASS_LOCAL_TESTS
               value: "false"
             - name: APP_ENVIRONMENT
@@ -38,6 +45,8 @@ spec:
                 name: chatbot-config
             - secretRef:
                 name: chatbot-external
+            - secretRef:
+                name: chatbot-runtime-external
           startupProbe:
             tcpSocket:
               port: http
@@ -47,8 +56,8 @@ spec:
             httpGet:
               path: /health
               port: http
-            timeoutSeconds: 20
-            periodSeconds: 30
+            timeoutSeconds: 40
+            periodSeconds: 45
           livenessProbe:
             tcpSocket:
               port: http
