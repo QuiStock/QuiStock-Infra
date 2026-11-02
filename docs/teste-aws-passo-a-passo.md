@@ -94,3 +94,9 @@ O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemi
 73. Execute `python $Lab down --account $Account --config $Config --confirm-destroy $Account`. Evidência: Terraform remove recursos da conta correta; bancos externos e bucket de estado são preservados.
 74. Confira no console AWS EKS, EC2, NLB, API Gateway, VPC e CloudFront. Evidência: nenhum recurso faturável residual do teste; mantenha bucket/estado para auditoria até decisão posterior.
 75. Após todos os critérios aprovados, revise os Draft PRs e decida a ordem de merge. Evidência: validação prática registrada antes de promover PRs para review.
+
+## Bateria autenticada automatizada
+
+`scripts/learner-lab/tests/live_authenticated.py --base-url <ORIGEM_HTTPS>` pede login comercial no terminal, mantém cookies/tokens em memória e grava somente resultados, IDs da conversa sintética e IDs das requisições em `.learner-lab/live-authenticated-results.json`. Não informe credenciais como argumentos. Usa o fluxo mobile do Auth, Bearer no Core e uma única conversa sintética para saudação, FAQ, consulta comercial, histórico, encerramento e refresh/logout. A avaliação de conteúdo continua sendo confirmada pelos traces.
+
+Com `--restart-kubeconfig <ARQUIVO> --account <CONTA_ESPERADA>`, também confere a conta STS, reinicia apenas o Deployment `api-chatbot` e verifica novamente o histórico. Não executa migrações nem operações comerciais de escrita. Para reproduzir a interface Android, ainda é necessário validar o APK real no dispositivo.
