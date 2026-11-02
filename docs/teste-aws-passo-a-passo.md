@@ -2,6 +2,7 @@
 
 Estado: preparação de código; nenhuma etapa AWS deste roteiro foi executada. Primeiro passo pendente: criação de `OBSERVABILITY_SESSION_SECRET`.
 Execute uma linha por vez, confirme a evidência e só então avance. No chat, o acompanhamento começa no passo 1.
+O PostgreSQL de teste já existe e é compartilhado entre os projetos. Nenhuma migração, criação automática de schema ou inicialização SQL será executada por este deploy. Se faltar estrutura, interrompa o teste e informe a incompatibilidade, sem aplicar DDL.
 O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemini e TypeSafe são dependências externas e precisam estar disponíveis; este Terraform não as cria.
 
 ## Preparação sem consumir a sessão do Lab
@@ -10,8 +11,8 @@ O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemi
 2. Crie `TYPESAFE_API_KEY` no mesmo projeto, com uma chave válida do TypeSafe. Evidência: UUID anotado, sem expor a chave.
 3. Conceda à machine account usada pelo operador Bitwarden acesso aos dois itens. Evidência: permissão de leitura no projeto.
 4. Confira os itens já mapeados nos três arquivos `clusters/us-east1/apps/*/bitwarden-secret.yaml`. Evidência: todos existem e a mesma machine account consegue lê-los; não copie valores para Git.
-5. Confira no provedor PostgreSQL se o banco de teste está isolado ou possui backup aprovado. Evidência: identificação do banco e backup, sem connection string no chat. O Core executa Flyway ao iniciar.
-6. Confira a existência de `public.super_admin` e de uma conta exclusiva de teste com senha BCrypt. Evidência: tabela e conta presentes, usuário SQL da IA com SELECT. As migrações do Core não criam essa tabela; se faltar, pare e solicite o provisionamento ao responsável pelo banco.
+5. Confirmado pelo solicitante: PostgreSQL de teste compartilhado, com schema já preparado. Evidência: RUN_MIGRATIONS=false, Flyway/Liquibase desativados, inicialização SQL em never e geração Hibernate desativada nos manifests de Auth e Core. Nenhuma migração será executada.
+6. Confira a existência de `public.super_admin` e de uma conta exclusiva de teste com senha BCrypt. Evidência: tabela e conta presentes, usuário SQL da IA com SELECT. As migrações do Core não criam essa tabela; se faltar, pare e informe a incompatibilidade; não crie tabela nem execute migração.
 7. Confira uma conta comercial ativa `MANAGER` ou `EMPLOYEE`, vinculada a exatamente uma loja ativa. Evidência: login e vínculo conferidos localmente, sem dados pessoais no chat.
 8. Confira que o usuário PostgreSQL da IA tem os SELECTs necessários às tabelas comerciais. Evidência: grants confirmados pelo administrador do banco.
 9. Confira que os nomes das três coleções de memória são distintos e não coincidem com outras coleções. Evidência: nomes validados; não reutilize coleções de produção para inicialização.
@@ -59,9 +60,9 @@ O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemi
 
 46. Execute `python $Lab memory --account $Account --config $Config --vector-size 768`. Evidência: Job check concluído; veja os logs usando o comando informado. 768 é a dimensão configurada pelo embedding da revisão atual.
 47. Revise contagens e dimensão. Evidência: se houver dados, não execute inicialização; valide a coleção existente separadamente. Se houver incompatibilidade, pare para planejar migração, sem apagar coleções.
-48. Somente para coleções novas e vazias, execute `python $Lab memory --account $Account --config $Config --vector-size 768 --apply`. Evidência: índices criados, coleção vetorial com dimensão correta; nenhum dado apagado.
+48. Não execute `memory --apply` neste teste compartilhado. Evidência: nenhuma criação ou alteração de coleções/índices pelo roteiro; se o check apontar estrutura ausente, interrompa e informe.
 49. Execute `python $Lab faq --account $Account --config $Config`. Evidência: documentos empacotados encontrados, dimensão compatível e contagem visível nos logs; nenhum embedding chamado em check.
-50. Para FAQ nova ou com manifesto Mongo compatível, execute `python $Lab faq --account $Account --config $Config --apply`. Evidência: `failed=0`. Coleção populada sem manifesto exige migração separada, não force reinicialização. Esta etapa usa Gemini e pode consumir créditos.
+50. Não execute `faq --apply` neste teste compartilhado. Evidência: corpus existente preservado; se a FAQ não estiver pronta, registre a pendência sem reinicializar ou migrar dados.
 51. Abra o website no URL HTTPS emitido. Evidência: SPA e assets carregam sem erros de MIME ou 404.
 52. Faça login comercial no website com a conta de teste. Evidência: fluxo normal de sessão, consultas Core autenticadas, sem CORS indevido.
 53. Confira uma tela de dados da loja de teste. Evidência: dados correspondem à loja autorizada e uma rota protegida sem sessão é negada.

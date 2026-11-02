@@ -29,6 +29,19 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            # Shared test database: schema is managed outside this deployment.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SPRING_LIQUIBASE_ENABLED
+              value: "false"
+            - name: SPRING_SQL_INIT_MODE
+              value: "never"
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "none"
+            - name: SPRING_JPA_GENERATE_DDL
+              value: "false"
             - name: ANALYSIS_SCHEDULE_ENABLED
               value: "false"
             - name: AI_API_BASE_URL
@@ -37,8 +50,6 @@ spec:
               value: "3000"
             - name: AI_READ_TIMEOUT_MS
               value: "24000"
-            - name: RUN_MIGRATIONS
-              value: "true"
             - name: SERVER_FORWARD_HEADERS_STRATEGY
               value: framework
             - name: COOKIE_SECURE

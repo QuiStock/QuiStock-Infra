@@ -29,6 +29,19 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            # Shared test database: schema is managed outside this deployment.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SPRING_LIQUIBASE_ENABLED
+              value: "false"
+            - name: SPRING_SQL_INIT_MODE
+              value: "never"
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "none"
+            - name: SPRING_JPA_GENERATE_DDL
+              value: "false"
             - name: SERVER_FORWARD_HEADERS_STRATEGY
               value: framework
             - name: CORS_ALLOWED_ORIGINS

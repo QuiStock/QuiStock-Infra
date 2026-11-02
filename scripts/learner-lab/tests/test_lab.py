@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import tempfile
 from pathlib import Path
 import unittest
@@ -20,6 +21,18 @@ class SafetyTests(unittest.TestCase):
         obj.region = "us-east-1"
         obj.dir = Path("isolated")
         return obj
+
+    def test_shared_sql_database_never_runs_schema_initialization(self):
+        required = {
+            "RUN_MIGRATIONS": "false", "SPRING_FLYWAY_ENABLED": "false",
+            "SPRING_LIQUIBASE_ENABLED": "false", "SPRING_SQL_INIT_MODE": "never",
+            "SPRING_JPA_HIBERNATE_DDL_AUTO": "none", "SPRING_JPA_GENERATE_DDL": "false",
+        }
+        for app in ("api-auth", "api-core"):
+            with self.subTest(app=app):
+                manifest = (lab.ROOT / f"clusters/us-east1/apps/{app}/deployment.yaml").read_text(encoding="utf-8")
+                settings = dict(re.findall(r'- name: (\S+)\s+value: "([^"\n]+)"', manifest))
+                self.assertEqual({key: settings.get(key) for key in required}, required)
 
     def test_wrong_account_stops_before_files_or_resources(self):
         config = {"region": "us-east-1", "bitwarden_secret_ids": {"TYPESAFE_API_KEY": "11111111-1111-4111-8111-111111111111", "OBSERVABILITY_SESSION_SECRET": "22222222-2222-4222-8222-222222222222"}}
