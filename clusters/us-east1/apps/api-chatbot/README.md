@@ -52,3 +52,7 @@ Consulte o [runbook](../../../../docs/learner-lab-atualizacao-runtime.md).
 A API usa `PORT=8000`. O frontend Observe é uma aplicação separada em `/observe/`; o proxy mantém o prefixo nativo `/api/v1/observability` para preservar o cookie. O bootstrap injeta a origem HTTPS atual e os dois itens adicionais de Secrets Manager pelos UUIDs da configuração local. O worker não recebe esses dois segredos.
 
 Os Jobs operacionais usam `python -m src.ops.memory` e `python -m src.ops.faq`, com check por padrão e apply explícito. Veja [teste atômico](../../../../docs/teste-aws-passo-a-passo.md).
+
+### Modelo JEV no teste AWS
+
+O catálogo `/v1/models` consultado no ambiente retornou `jev-latest` e `jev-preview`; `jev-1.13.0` não estava disponível. O deploy usa `TYPESAFE_JEV_MODEL=jev-latest`, também validado pelo readiness. A seleção é um alias do provedor; a avaliação funcional permanece no roteiro. Após alterar esse ConfigMap, reinicie o Deployment para recarregar as variáveis de ambiente.
