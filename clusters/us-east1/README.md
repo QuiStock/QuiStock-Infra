@@ -1,8 +1,8 @@
-# QuiStock: cinco aplicações no EKS
+# QuiStock: cinco aplicações no Kubernetes
 
-Comece por [criar a infraestrutura do zero](../../docs/deploy-aws-do-zero.md).
-Para senha do Argo CD, rotação de secrets e rollout, use
-[comandos de operação](../../docs/comandos-operacao-aws.md).
+Para o ambiente K3s descartável da feira, use o [guia atual de criação,
+retomada, acesso ao Argo e destruição](../../docs/kubernetes-lab.md).
+Os manifests das aplicações também atendem o EKS histórico descrito abaixo.
 
 Terraform mantém EKS, rede, add-ons, dois NLBs e API Gateway. O bootstrap instala
 Argo CD e Bitwarden e configura o token inicial. Argo reconcilia Auth, Core,

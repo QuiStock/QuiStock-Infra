@@ -1,5 +1,9 @@
 # Criar a infraestrutura AWS do zero
 
+> Histórico do fluxo EKS. Para o ambiente K3s descartável da feira, use o
+> [guia atual de Kubernetes no Lab](kubernetes-lab.md). Não aplique este root
+> antigo sobre o state já adotado pelo novo fluxo.
+
 Guia para **PowerShell 7.1+ no computador local**, na pasta `QuiStock-Infra`.
 Não é necessário um cluster ou CloudShell para começar: o Terraform cria o
 cluster, e o bootstrap instala os componentes Kubernetes depois.
