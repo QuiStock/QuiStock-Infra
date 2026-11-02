@@ -1,5 +1,8 @@
 # Comandos de operação AWS
 
+> Estes comandos apontam para o EKS anterior. Criação, recuperação, acesso ao
+> Argo, verificação e destruição do K3s estão no [guia atual](kubernetes-lab.md).
+
 Exemplos para PowerShell 7.1+, executados na raiz de `QuiStock-Infra`.
 Para criar tudo pela primeira vez, siga [deploy do zero](deploy-aws-do-zero.md).
 Esta página não exige executar Terraform para consultar o cluster ou reiniciar pods.

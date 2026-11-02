@@ -1,5 +1,10 @@
 # Teste completo na AWS antes do merge
 
+> Roteiro histórico do provisionamento EKS. Para criar, recuperar, verificar
+> e destruir o K3s da feira, use o [guia atual](kubernetes-lab.md). Os testes
+> funcionais de aplicação continuam úteis, mas não execute os comandos antigos
+> de infraestrutura sobre o state adotado.
+
 Para executar o provisionamento com comandos PowerShell copiáveis, comece por
 [criar a infraestrutura do zero](deploy-aws-do-zero.md). Para senha do Argo CD,
 rotação de secrets e rollout, consulte [comandos de operação](comandos-operacao-aws.md).
