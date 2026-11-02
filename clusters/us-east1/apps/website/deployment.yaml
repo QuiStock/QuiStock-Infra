@@ -21,7 +21,7 @@ spec:
         kubernetes.io/arch: arm64
       containers:
         - name: nginx
-          image: ghcr.io/quistock/web-frontend@sha256:1879409848944f9c0c40ebb01d2dc13cfa06237feeb28fbf97c1b36ec1898a28
+          image: ghcr.io/quistock/web-frontend@sha256:b2137f1a4e683d074ccc78cb2abad33edc56fb146e28fa96c2cd4e5a13da03fc
           ports:
             - name: http
               containerPort: 8080
