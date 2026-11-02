@@ -46,3 +46,9 @@ Coleções/índices exigem provisionamento avulso e dimensão de embedding
 verificada. Use `lab.py memory` primeiro sem `--apply`. Não executar apply
 indiscriminadamente sobre dados existentes; esse comando não ingere FAQ.
 Consulte o [runbook](../../../../docs/learner-lab-atualizacao-runtime.md).
+
+## Runtime atual e Observe
+
+A API usa `PORT=8000`. O frontend Observe é uma aplicação separada em `/observe/`; o proxy mantém o prefixo nativo `/api/v1/observability` para preservar o cookie. O bootstrap injeta a origem HTTPS atual e os dois itens adicionais de Secrets Manager pelos UUIDs da configuração local. O worker não recebe esses dois segredos.
+
+Os Jobs operacionais usam `python -m src.ops.memory` e `python -m src.ops.faq`, com check por padrão e apply explícito. Veja [teste atômico](../../../../docs/teste-aws-passo-a-passo.md).
