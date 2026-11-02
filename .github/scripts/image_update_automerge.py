@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 ALLOWED_FILES = {
     f"clusters/us-east1/apps/{service}/deployment.yaml"
-    for service in ("api-auth", "api-core", "api-chatbot", "website")
+    for service in ("api-auth", "api-core", "api-chatbot", "website", "observe")
 }
 IMAGE_LINE = re.compile(
     r"(?P<prefix>[ \t]+image:[ \t]+)(?P<image>[^\s'\"#]+)(?P<suffix>[ \t]*(?:#.*)?)"

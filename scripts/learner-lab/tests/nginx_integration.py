@@ -58,7 +58,7 @@ class ProxyIntegration(unittest.TestCase):
         fixture_script = Path(cls.temp.name) / "fixture.py"
         fixture_script.write_text(
             "import http.server, json, threading, time\n" + inspect.getsource(Fixture) +
-            "\nfor service, port in [('core', 8081), ('auth', 8082)]:\n"
+            "\nfor service, port in [('core', 8081), ('auth', 8082), ('ai', 8083), ('observe', 8084)]:\n"
             "    server = http.server.ThreadingHTTPServer(('0.0.0.0', port), Fixture)\n"
             "    server.service = service\n"
             "    threading.Thread(target=server.serve_forever, daemon=True).start()\n"
@@ -67,6 +67,8 @@ class ProxyIntegration(unittest.TestCase):
         conf = conf.replace("kube-dns.kube-system.svc.cluster.local", "127.0.0.11")
         conf = conf.replace("api-core.api-core.svc.cluster.local", cls.fixture + ":8081")
         conf = conf.replace("api-auth.api-auth.svc.cluster.local", cls.fixture + ":8082")
+        conf = conf.replace("api-chatbot.api-chatbot.svc.cluster.local", cls.fixture + ":8083")
+        conf = conf.replace("observe.observe.svc.cluster.local", cls.fixture + ":8084")
         path = Path(cls.temp.name) / "nginx.conf"
         path.write_text(conf, encoding="utf-8")
         html = Path(cls.temp.name) / "html"
@@ -114,6 +116,19 @@ class ProxyIntegration(unittest.TestCase):
                                               "X-CSRF-TOKEN": "auth-fixture", "X-XSRF-TOKEN": "core-fixture"})
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read()), r.headers
+
+    def test_observe_api_keeps_native_path_body_and_cookie(self):
+        body = '{"email":"fixture@example.com","password":"fixture"}'
+        result, headers = self.request("/api/v1/observability/auth/login?test=1", "POST", body)
+        self.assertEqual((result["service"], result["path"], result["body"]),
+                         ("ai", "/api/v1/observability/auth/login?test=1", body))
+        self.assertEqual(result["cookie"], "refresh_token=fixture")
+        self.assertIn("no-store", headers["Cache-Control"])
+
+    def test_observe_frontend_keeps_subpath(self):
+        result, _ = self.request("/observe/assets/app.js")
+        self.assertEqual((result["service"], result["path"]),
+                         ("observe", "/observe/assets/app.js"))
 
     def test_core_post_strips_only_api_prefix_and_keeps_body_query_headers(self):
         body = '{"prompt":"fixture"}'

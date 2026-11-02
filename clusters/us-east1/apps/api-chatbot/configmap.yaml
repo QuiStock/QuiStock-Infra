@@ -11,6 +11,10 @@ data:
   AUTH_JWT_AUDIENCE: quistock-api
   GEMINI_EMBEDDING_MODEL: gemini-embedding-2
   GEMINI_EMBEDDING_TIER: free
+  TYPESAFE_API_BASE_URL: https://api.typesafe.ai
+  TYPESAFE_JEV_MODEL: jev-1.13.0
+  TYPESAFE_JEV_TIMEOUT_SECONDS: "5"
+  HEALTH_PROBE_TIMEOUT_SECONDS: "5"
   SUMMARY_QUEUE_STREAM: quistock:conversation-summary
   SUMMARY_QUEUE_GROUP: summary-workers
   SUMMARY_JOB_MAX_ATTEMPTS: "5"
