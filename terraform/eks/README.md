@@ -1,5 +1,9 @@
 # EKS ARM64 no Learner Lab
 
+Para a criação atual do zero, siga [o guia PowerShell](../../docs/deploy-aws-do-zero.md).
+Para acesso e manutenção, consulte [comandos de operação](../../docs/comandos-operacao-aws.md).
+Os detalhes de migração abaixo se aplicam a estados antigos.
+
 Argo CD tem um NLB público separado em TCP 443 e HTTPS NodePort 30081,
 com autenticação obrigatória e certificado autoassinado. Não exige CloudFront,
 ACM ou domínio. IPv4 público em 443 é aberto a qualquer origem conforme

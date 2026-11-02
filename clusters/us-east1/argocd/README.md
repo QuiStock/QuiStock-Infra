@@ -1,5 +1,9 @@
 # Argo CD no EKS ARM64
 
+**Senha inicial (`admin`):** veja os comandos PowerShell em
+[descobrir a senha do Argo CD](../../../docs/comandos-operacao-aws.md#2-descobrir-a-senha-inicial-do-argo-cd).
+O mesmo guia cobre sincronização Git e rollout após rotação de secrets.
+
 Chart `argo/argo-cd` 10.9.6, instalado pelo script de bootstrap. Terraform cria
 um NLB público separado com endereço HTTPS `elb.amazonaws.com`. TCP 443
 encaminha ao HTTPS do Argo CD na NodePort 30081. O HTTP/NodePort 30082 não é
@@ -22,6 +26,8 @@ Acesse `https://localhost:8443`. Para a CLI pública, use
 Recupere a senha somente em terminal privado e guarde-a no Bitwarden. Confira
 KUBECONFIG/conta antes de operar. Teste login, sincronização e logs no navegador.
 
-Veja o [runbook](../../../docs/learner-lab-feira.md) para atualização do cluster
-existente com `update --migrate-argocd-public --apply`, recuperação e troca de
-conta. Argo CD preserva os paths GitOps em `clusters/us-east1`.
+Para reconstrução, siga [deploy do zero](../../../docs/deploy-aws-do-zero.md).
+O [runbook histórico](../../../docs/learner-lab-feira.md) mantém detalhes da
+migração de um cluster antigo com `update --migrate-argocd-public --apply`.
+Essa migração não é necessária no deploy de uma conta vazia.
+Argo CD preserva os paths GitOps em `clusters/us-east1`.

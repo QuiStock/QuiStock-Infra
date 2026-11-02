@@ -1,5 +1,6 @@
 # Teste em uma nova conta do Learner Lab
 
+> Para reconstruir uma conta vazia, use [o guia atual com comandos PowerShell](deploy-aws-do-zero.md). Acesso ao Argo CD e rotação de secrets estão em [comandos de operação](comandos-operacao-aws.md).
 > Para o teste atual antes do merge, siga [o roteiro atômico](teste-aws-passo-a-passo.md). Este documento registra a preparação anterior.
 
 Esta atualização coordena o [Infra #40](https://github.com/QuiStock/QuiStock-Infra/pull/40) com [AI_Multi-Agent #39](https://github.com/QuiStock/AI_Multi-Agent/pull/39), [quistock-dad #25](https://github.com/QuiStock/quistock-dad/pull/25) e os publishers manuais de [Auth #13](https://github.com/QuiStock/DS_Auth/pull/13)/[Core #41](https://github.com/QuiStock/DS_Backend/pull/41). Não exige recriar os bancos externos. Nenhum recurso AWS foi aplicado durante a implementação.

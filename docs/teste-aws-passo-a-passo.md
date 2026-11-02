@@ -1,5 +1,10 @@
 # Teste completo na AWS antes do merge
 
+Para executar o provisionamento com comandos PowerShell copiáveis, comece por
+[criar a infraestrutura do zero](deploy-aws-do-zero.md). Para senha do Argo CD,
+rotação de secrets e rollout, consulte [comandos de operação](comandos-operacao-aws.md).
+Esta página é o checklist detalhado de evidências do teste.
+
 Estado: infraestrutura criada e fluxos principais validados no Learner Lab em 02/11/2026, antes do merge. Evidências e limites em [resultado do teste](resultado-teste-aws-2026-11-02.md). Este roteiro permanece como instrução para reproduzir o deploy em uma conta vazia.
 Execute uma linha por vez, confirme a evidência e só então avance. Em uma nova execução, o acompanhamento começa no passo 1.
 O PostgreSQL de teste já existe e é compartilhado entre os projetos. Nenhuma migração, criação automática de schema ou inicialização SQL será executada por este deploy. Se faltar estrutura, interrompa o teste e informe a incompatibilidade, sem aplicar DDL.
@@ -82,7 +87,7 @@ O Learner Lab começa sem recursos AWS. PostgreSQL, MongoDB, Redis, Qdrant, Gemi
 64. Tente senha inválida na conta de observabilidade. Evidência: login negado, nenhuma sessão emitida.
 65. Faça login com a conta de `super_admin`. Evidência: cookie HttpOnly/Secure com Path `/api/v1/observability`, sem valor copiado no chat.
 66. Abra os traces da conversa usada nos passos anteriores. Evidência: correlação da requisição, etapas, métricas e custos, sem conteúdo sensível indevido.
-67. Execute uma única avaliação de laboratório com entrada sintética. Evidência: resposta do JEV/TypeSafe e resultado visível no Observe. Confirme consumo no provedor antes de repetir.
+67. No trace sintético de FAQ, selecione `Testar faq_rag` e execute um único experimento no Lab. Evidência: decisão de ferramenta, como `faq_search`, visível sem executá-la. O preview não é a avaliação JEV/TypeSafe: essa deve ser conferida nos traces do fluxo de chat. Confirme consumo no provedor antes de repetir.
 68. Faça logout do Observe. Evidência: sessão removida e endpoint protegido volta a negar acesso.
 69. Reinicie controladamente o Deployment da IA em `api-chatbot`. Evidência: API e worker voltam Ready e dados históricos permanecem disponíveis.
 70. Repita uma consulta de histórico. Evidência: conversa/resumo preservados após reinício.
