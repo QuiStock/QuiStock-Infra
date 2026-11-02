@@ -22,7 +22,7 @@ spec:
         kubernetes.io/arch: arm64
       containers:
         - name: observe
-          image: ghcr.io/quistock/ai-observe@sha256:885d8e8d38ca9834339d0b73c018df577157c8639b44c1130851a1ee763af355
+          image: ghcr.io/quistock/ai-observe@sha256:98586cba05e03d137f1176aee53504d4b098e9fac0a156ea55bb64b4d11a3b89
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
