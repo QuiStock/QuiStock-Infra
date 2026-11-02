@@ -1,8 +1,9 @@
-name: Validate EKS and Learner Lab bootstrap
+name: Validate Kubernetes and Learner Lab lifecycle
 on:
   pull_request:
     paths:
       - 'terraform/eks/**'
+      - 'terraform/lab/**'
       - 'scripts/learner-lab/**'
       - 'clusters/us-east1/**'
       - '.github/workflows/eks-validate.yml'
@@ -27,6 +28,10 @@ jobs:
       - run: terraform -chdir=terraform/eks init -backend=false -input=false -lockfile=readonly
       - run: terraform -chdir=terraform/eks validate -no-color
       - run: terraform -chdir=terraform/eks test -no-color
+      - run: terraform -chdir=terraform/lab fmt -check -recursive
+      - run: terraform -chdir=terraform/lab init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=terraform/lab validate -no-color
+      - run: terraform -chdir=terraform/lab test -no-color
       - run: python -m unittest discover -s scripts/learner-lab/tests -v
       - run: python scripts/learner-lab/tests/nginx_integration.py
       - run: kubectl kustomize clusters/us-east1/apps/website > /tmp/website.yaml
