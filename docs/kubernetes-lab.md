@@ -57,7 +57,6 @@ Inicie o Lab no portal e renove as credenciais temporárias do perfil, incluindo
 versionados ou no JSON de configuração.
 
 ```powershell
-Set-Location C:\Users\lucasdonini-ieg\codes\inter\QuiStock-Infra
 $env:AWS_PROFILE = "quistock-lab"
 $Account = "637423317921"
 $Region = "us-east-1"
